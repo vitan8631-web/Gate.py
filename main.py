@@ -47,7 +47,6 @@ def send_log(msg):
 
 async def main():
     async with async_playwright() as p:
-        # headless=True عشان أسرع على السيرفر، بس ممكن تخليها False لو عايز تشوف
         browser = await p.chromium.launch(headless=True, slow_mo=50)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
@@ -56,20 +55,18 @@ async def main():
         page = await context.new_page()
 
         try:
-            # 1. فتح الموقع والبحث
+            # 1. البحث عن المنتج
             send_log("🔍 Searching for product...")
             await page.goto("https://www.stickandcaneshop.co.uk/", wait_until="domcontentloaded", timeout=30000)
             
-            # كتابة كود المنتج في خانة البحث
             search_input = page.locator('input[name="for"]').first
             await search_input.fill(PRODUCT_CODE)
             await search_input.press("Enter")
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # 2. الضغط على المنتج اللي ظهر
+            # 2. الضغط على المنتج
             send_log("🛒 Opening product page...")
-            # بندور على أي رابط فيه كود المنتج أو كلمة Rubber Tip
             product_link = page.locator(f'a:has-text("{PRODUCT_CODE}"), a:has-text("Rubber Tip"), a:has-text("Veritas Ferrule")').first
             if await product_link.is_visible():
                 await product_link.click()
@@ -82,14 +79,16 @@ async def main():
 
             # 3. إضافة المنتج للسلة
             send_log("➕ Adding product to basket...")
-            # لو فيه Accept All Cookies، بنضغطها عشان ميعطلش
+            
+            # تخطي الكوكيز
             try:
                 cookie_btn = page.locator('button:has-text("Accept All")').first
                 if await cookie_btn.is_visible(timeout=2000):
                     await cookie_btn.click()
             except: pass
 
-            add_to_cart_btn = page.locator('button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], input[value*="Add to Cart"], .add-to-basket').first
+            # التعديل هنا: ضفنا "Add to Bag"
+            add_to_cart_btn = page.locator('button:has-text("Add to Bag"), button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], .add-to-basket, .add-to-cart').first
             await add_to_cart_btn.click()
             await page.wait_for_timeout(1500)
 
@@ -108,43 +107,36 @@ async def main():
             # 6. ملء فورم البيانات
             send_log("📝 Filling customer info...")
             
-            # الإيميل
             email_input = page.locator('input[name="email"], input[type="email"]').first
             if await email_input.is_visible():
                 await email_input.fill(CUSTOMER["email"])
                 send_log("✅ Email filled.")
 
-            # الاسم الأول
             first_name_input = page.locator('input[name="first_name"], input[name="billing_first_name"]').first
             if await first_name_input.is_visible():
                 await first_name_input.fill(CUSTOMER["first_name"])
                 send_log("✅ First name filled.")
 
-            # الاسم الأخير
             last_name_input = page.locator('input[name="last_name"], input[name="billing_last_name"]').first
             if await last_name_input.is_visible():
                 await last_name_input.fill(CUSTOMER["last_name"])
                 send_log("✅ Last name filled.")
 
-            # العنوان
             address_input = page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"]').first
             if await address_input.is_visible():
                 await address_input.fill(CUSTOMER["address"])
                 send_log("✅ Address filled.")
 
-            # المدينة
             city_input = page.locator('input[name="city"], input[name="billing_city"]').first
             if await city_input.is_visible():
                 await city_input.fill(CUSTOMER["city"])
                 send_log("✅ City filled.")
 
-            # الرمز البريدي
             postcode_input = page.locator('input[name="postcode"], input[name="billing_postcode"], input[name="zip"]').first
             if await postcode_input.is_visible():
                 await postcode_input.fill(CUSTOMER["postcode"])
                 send_log("✅ Postcode filled.")
 
-            # التليفون
             phone_input = page.locator('input[name="phone"], input[name="telephone"], input[name="billing_phone"]').first
             if await phone_input.is_visible():
                 await phone_input.fill(CUSTOMER["phone"])
@@ -237,7 +229,6 @@ if __name__ == "__main__":
         try:
             asyncio.run(main())
             send_log("✅ Process completed successfully.")
-            # ممكن نضيف وقت استراحة هنا بين كل عملية والتانية
             time.sleep(30) 
         except Exception as e:
             send_log(f"❌ Process crashed: {e}")
