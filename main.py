@@ -4,20 +4,14 @@ import time
 from playwright.async_api import async_playwright
 import telebot
 
-# ═══════════════════════════════════════════════════════════════════
-# CONFIG
-# ═══════════════════════════════════════════════════════════════════
-
 BOT_TOKEN = '8407490230:AAHjhQCu-k7Y6VcvzWKyQiNXnOUJabQgmVg'
 ADMIN_ID = 6843321125
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# بيانات الكارت
 CARD_NUMBER = "4059986126444431"
 CARD_EXPIRY = "11/30"
 CARD_CVC = "947"
 
-# بيانات العميل
 CUSTOMER = {
     "email": "wafabro6576@gmail.com",
     "first_name": "Wafa",
@@ -28,11 +22,8 @@ CUSTOMER = {
     "phone": "20177748870",
 }
 
-PRODUCT_CODE = "VER001071" 
+PRODUCT_CODE = "VER001071"
 
-# ═══════════════════════════════════════════════════════════════════
-# LOGGING
-# ═══════════════════════════════════════════════════════════════════
 
 def send_log(msg):
     print(msg)
@@ -41,33 +32,61 @@ def send_log(msg):
     except Exception as e:
         print(f"Telegram error: {e}")
 
-# ═══════════════════════════════════════════════════════════════════
-# MAIN SCRIPT
-# ═══════════════════════════════════════════════════════════════════
+
+async def accept_cookies(page):
+    for sel in ['button:has-text("Accept All")', '#onetrust-accept-btn-handler',
+                'button:has-text("Essential Only")']:
+        try:
+            btn = page.locator(sel).first
+            if await btn.is_visible(timeout=2000):
+                await btn.click()
+                await page.wait_for_timeout(800)
+                return True
+        except Exception:
+            pass
+    return False
+
+
+async def wait_for_any(page, selectors, timeout=8000):
+    deadline = time.time() + timeout / 1000
+    while time.time() < deadline:
+        for sel in selectors:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0 and await loc.is_visible():
+                    return loc
+            except Exception:
+                pass
+        await page.wait_for_timeout(300)
+    return None
+
 
 async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, slow_mo=50)
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915},
         )
         page = await context.new_page()
 
         try:
-            # 1. البحث عن المنتج
             send_log("🔍 Searching for product...")
-            await page.goto("https://www.stickandcaneshop.co.uk/", wait_until="domcontentloaded", timeout=30000)
-            
+            await page.goto("https://www.stickandcaneshop.co.uk/",
+                            wait_until="domcontentloaded", timeout=30000)
+            await accept_cookies(page)
+
             search_input = page.locator('input[name="for"]').first
             await search_input.fill(PRODUCT_CODE)
             await search_input.press("Enter")
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(3000)
 
-            # 2. الضغط على المنتج
             send_log("🛒 Opening product page...")
-            product_link = page.locator(f'a:has-text("{PRODUCT_CODE}"), a:has-text("Rubber Tip")').first
+            product_link = page.locator(
+                f'a:has-text("{PRODUCT_CODE}"), a:has-text("Rubber Tip")'
+            ).first
             if await product_link.is_visible():
                 await product_link.click()
                 await page.wait_for_load_state("domcontentloaded")
@@ -75,198 +94,213 @@ async def main():
             else:
                 raise Exception("Product link not found")
 
-            # 3. إضافة المنتج للسلة
             send_log("➕ Adding product to basket...")
-            try:
-                cookie_btn = page.locator('button:has-text("Accept All")').first
-                if await cookie_btn.is_visible(timeout=3000):
-                    await cookie_btn.click()
-                    send_log("🍪 Cookies accepted.")
-                    await page.wait_for_timeout(1000)
-            except: pass
-
-            add_to_cart_btn = page.locator('button:has-text("Add to Bag"), button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], .add-to-basket, .add-to-cart').first
+            await accept_cookies(page)
+            add_to_cart_btn = page.locator(
+                'button:has-text("Add to Bag"), button:has-text("Add to Basket"), '
+                'button:has-text("Add to Cart"), input[value*="Add to Basket"], '
+                '.add-to-basket, .add-to-cart'
+            ).first
             await add_to_cart_btn.click()
             await page.wait_for_timeout(2000)
 
-            # 4. الذهاب للسلة
             send_log("🛒 Going to basket...")
-            await page.goto("https://www.stickandcaneshop.co.uk/basket", wait_until="domcontentloaded", timeout=30000)
+            await page.goto("https://www.stickandcaneshop.co.uk/basket",
+                            wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(2000)
 
-            # 5. الضغط على Checkout
             send_log("👉 Clicking Checkout...")
-            checkout_btn = page.locator('a:has-text("Checkout"), button:has-text("Checkout"), input[value*="Checkout"], .checkout-button, #checkout').first
+            checkout_btn = page.locator(
+                'a:has-text("Checkout"), button:has-text("Checkout"), '
+                'input[value*="Checkout"], .checkout-button, #checkout'
+            ).first
             if await checkout_btn.is_visible():
                 await checkout_btn.click()
             else:
                 send_log("⚠️ Checkout button not found, trying direct URL...")
-                await page.goto("https://www.stickandcaneshop.co.uk/checkout", wait_until="domcontentloaded", timeout=30000)
+                await page.goto("https://www.stickandcaneshop.co.uk/checkout",
+                                wait_until="domcontentloaded", timeout=30000)
 
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
+            await accept_cookies(page)
 
-            # 6. الموافقة على الكوكيز
-            send_log("🍪 Accepting cookies on checkout page...")
-            try:
-                cookie_btn = page.locator('button:has-text("Accept All")').first
-                if await cookie_btn.is_visible(timeout=3000):
-                    await cookie_btn.click()
-                    send_log("✅ Cookies accepted on checkout.")
-                    await page.wait_for_timeout(1000)
-            except: pass
-
-            # 7. اختيار "I am a new customer" والضغط على Continue
+            # 7. اختيار new customer
             send_log("👤 Selecting 'New Customer'...")
             try:
-                new_customer_radio = page.locator('input[type="radio"][value*="new"], label:has-text("I am a new customer")').first
-                if await new_customer_radio.is_visible(timeout=3000):
-                    await new_customer_radio.click()
-                    send_log("✅ New customer selected.")
-                    await page.wait_for_timeout(1000)
-            except: pass
-
-            # 8. الضغط على Continue بعد اختيار New Customer
-            send_log("➡️ Clicking Continue after selecting new customer...")
-            try:
-                continue_btn = page.locator('button:has-text("Continue"), input[value*="Continue"], button:has-text("Proceed"), input[value*="Proceed"]').first
-                if await continue_btn.is_visible(timeout=3000):
-                    await continue_btn.click()
-                    send_log("✅ Clicked Continue after new customer.")
-                    await page.wait_for_load_state("domcontentloaded")
-                    await page.wait_for_timeout(3000)  # استنى الصفحة الجديدة تحمل
+                await page.locator('label:has-text("I am a new customer")').first.click()
+                await page.wait_for_timeout(1200)
             except Exception as e:
-                send_log(f"⚠️ Could not click Continue: {e}")
+                send_log(f"⚠️ radio click issue: {e}")
 
-            # 9. ملء فورم البيانات (اللي هيظهر بعد Continue)
+            # 8. بعد اختيار new customer، نملأ الإيميل مباشرة (الخيار بيظهر فوراً بدون Continue)
+            send_log("📧 Waiting for email input...")
+            email_locator = await wait_for_any(
+                page,
+                ['input[name="email"]', 'input[type="email"]', 'input[name="billing_email"]'],
+                timeout=10000,
+            )
+            if not email_locator:
+                await page.screenshot(path="no_email.png", full_page=True)
+                with open("no_email.png", 'rb') as photo:
+                    bot.send_photo(ADMIN_ID, photo, caption="🚨 حقل الإيميل مش ظهر")
+                os.remove("no_email.png")
+                raise Exception("Email input not found after selecting new customer")
+
+            await email_locator.fill(CUSTOMER["email"])
+            send_log("✅ Email filled.")
+            await page.wait_for_timeout(1000)
+
+            # 9. اختيار "Checkout as a Guest"
+            send_log("🚶 Choosing 'Checkout as a Guest'...")
+            guest_btn = await wait_for_any(
+                page,
+                ['button:has-text("Checkout as a Guest")',
+                 'a:has-text("Checkout as a Guest")',
+                 'input[value*="Guest"]',
+                 'button:has-text("Guest")'],
+                timeout=8000,
+            )
+            if guest_btn:
+                await guest_btn.click()
+                await page.wait_for_load_state("domcontentloaded")
+                await page.wait_for_timeout(3000)
+                send_log("✅ Guest checkout selected.")
+            else:
+                # fallback: إنشاء حساب
+                send_log("⚠️ Guest button not found, trying 'Create an Account'...")
+                create_btn = page.locator(
+                    'button:has-text("Create an Account"), '
+                    'a:has-text("Create an Account"), input[value*="Create"]'
+                ).first
+                if await create_btn.is_visible(timeout=2000):
+                    await create_btn.click()
+                    await page.wait_for_load_state("domcontentloaded")
+                    await page.wait_for_timeout(3000)
+                else:
+                    raise Exception("No checkout option found after email")
+
+            # 10. ملء فورم البيانات (اللي هيظهر بعد Guest)
             send_log("📝 Filling customer info...")
-            
-            # استنى شوية عشان الفورم يظهر
             await page.wait_for_timeout(2000)
-            
-            email_input = page.locator('input[name="email"], input[type="email"]').first
-            if await email_input.is_visible(timeout=2000):
-                await email_input.fill(CUSTOMER["email"])
-                send_log("✅ Email filled.")
 
-            first_name_input = page.locator('input[name="first_name"], input[name="billing_first_name"]').first
-            if await first_name_input.is_visible(timeout=2000):
-                await first_name_input.fill(CUSTOMER["first_name"])
-                send_log("✅ First name filled.")
+            # تأكد إن الفورم ظهر
+            first_name_input = page.locator(
+                'input[name="first_name"], input[name="billing_first_name"]'
+            ).first
+            if not await first_name_input.is_visible(timeout=8000):
+                await page.screenshot(path="no_form.png", full_page=True)
+                with open("no_form.png", 'rb') as photo:
+                    bot.send_photo(ADMIN_ID, photo, caption="🚨 فورم البيانات مش ظهر بعد Guest")
+                os.remove("no_form.png")
+                raise Exception("Customer form not found after guest checkout")
 
-            last_name_input = page.locator('input[name="last_name"], input[name="billing_last_name"]').first
-            if await last_name_input.is_visible(timeout=2000):
-                await last_name_input.fill(CUSTOMER["last_name"])
-                send_log("✅ Last name filled.")
+            await first_name_input.fill(CUSTOMER["first_name"])
+            await page.locator(
+                'input[name="last_name"], input[name="billing_last_name"]'
+            ).first.fill(CUSTOMER["last_name"])
+            await page.locator(
+                'input[name="address1"], input[name="billing_address1"], input[name="address"]'
+            ).first.fill(CUSTOMER["address"])
+            await page.locator(
+                'input[name="city"], input[name="billing_city"]'
+            ).first.fill(CUSTOMER["city"])
+            await page.locator(
+                'input[name="postcode"], input[name="billing_postcode"], input[name="zip"]'
+            ).first.fill(CUSTOMER["postcode"])
+            await page.locator(
+                'input[name="phone"], input[name="telephone"], input[name="billing_phone"]'
+            ).first.fill(CUSTOMER["phone"])
+            send_log("✅ Customer form filled.")
 
-            address_input = page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"]').first
-            if await address_input.is_visible(timeout=2000):
-                await address_input.fill(CUSTOMER["address"])
-                send_log("✅ Address filled.")
-
-            city_input = page.locator('input[name="city"], input[name="billing_city"]').first
-            if await city_input.is_visible(timeout=2000):
-                await city_input.fill(CUSTOMER["city"])
-                send_log("✅ City filled.")
-
-            postcode_input = page.locator('input[name="postcode"], input[name="billing_postcode"], input[name="zip"]').first
-            if await postcode_input.is_visible(timeout=2000):
-                await postcode_input.fill(CUSTOMER["postcode"])
-                send_log("✅ Postcode filled.")
-
-            phone_input = page.locator('input[name="phone"], input[name="telephone"], input[name="billing_phone"]').first
-            if await phone_input.is_visible(timeout=2000):
-                await phone_input.fill(CUSTOMER["phone"])
-                send_log("✅ Phone filled.")
-
-            # 10. الضغط على Submit & Continue (بعد ملء الفورم)
-            send_log("➡️ Clicking Submit & Continue after filling form...")
-            submit_btn = page.locator('button:has-text("Submit & Continue"), button:has-text("Continue"), input[value*="Submit"]').first
+            # 11. Submit & Continue
+            send_log("➡️ Submitting form...")
+            submit_btn = page.locator(
+                'button:has-text("Submit & Continue"), button:has-text("Continue"), '
+                'input[value*="Submit"]'
+            ).first
             if await submit_btn.is_visible(timeout=2000):
                 await submit_btn.click()
                 await page.wait_for_load_state("domcontentloaded")
-                await page.wait_for_timeout(3000)  # استنى صفحة الدفع
+                await page.wait_for_timeout(3000)
 
-            # 11. اختيار الفيزا
+            # 12. اختيار الفيزا
             send_log("💳 Selecting Credit/Debit Card...")
-            await page.locator('label:has-text("Credit / Debit Card")').click()
+            card_label = await wait_for_any(
+                page,
+                ['label:has-text("Credit / Debit Card")',
+                 'label:has-text("Credit/Debit Card")',
+                 'label:has-text("Card")'],
+                timeout=10000,
+            )
+            if not card_label:
+                await page.screenshot(path="no_card.png", full_page=True)
+                with open("no_card.png", 'rb') as photo:
+                    bot.send_photo(ADMIN_ID, photo, caption="🚨 صفحة الدفع مش ظهر — اختيار الفيزا فشل")
+                os.remove("no_card.png")
+                raise Exception("Card payment option not found")
+
+            await card_label.click()
             await page.wait_for_timeout(1500)
 
-            # 12. ملء الكارت
-            send_log("🔢 Filling card number...")
-            frame_number = page.frame_locator('iframe[name="braintree-hosted-field-number"]')
-            await frame_number.locator('input').press_sequentially(CARD_NUMBER, delay=20)
+            # 13. ملء الكارت
+            send_log("🔢 Filling card...")
+            await page.frame_locator(
+                'iframe[name="braintree-hosted-field-number"]'
+            ).locator('input').press_sequentially(CARD_NUMBER, delay=20)
+            await page.frame_locator(
+                'iframe[name="braintree-hosted-field-expirationDate"]'
+            ).locator('input').press_sequentially(CARD_EXPIRY, delay=20)
+            await page.frame_locator(
+                'iframe[name="braintree-hosted-field-cvv"]'
+            ).locator('input').press_sequentially(CARD_CVC, delay=20)
 
-            send_log("📅 Filling expiry date...")
-            frame_exp = page.frame_locator('iframe[name="braintree-hosted-field-expirationDate"]')
-            await frame_exp.locator('input').press_sequentially(CARD_EXPIRY, delay=20)
-
-            send_log("🔒 Filling CVV...")
-            frame_cvv = page.frame_locator('iframe[name="braintree-hosted-field-cvv"]')
-            await frame_cvv.locator('input').press_sequentially(CARD_CVC, delay=20)
-
-            # 13. الموافقة على الشروط
-            send_log("✅ Checking Terms & Conditions...")
             accept_checkbox = page.locator('input[name="accept"]')
             if await accept_checkbox.is_visible(timeout=2000):
                 await accept_checkbox.check()
-                send_log("✅ Terms accepted.")
 
-            # 14. الضغط على Complete Purchase
             send_log("🚀 Clicking 'Complete Purchase'...")
             await page.locator('#input_submit').click()
-
-            # 15. استنى الرد
-            send_log("⏳ Waiting for final response...")
             await page.wait_for_timeout(10000)
 
-            # 16. استخراج النتيجة
             page_text = await page.inner_text("body")
             if "Transaction Not Allowed" in page_text:
                 send_log("❌ Result: Transaction Not Allowed")
             elif "Purchase Unsuccessful" in page_text:
                 send_log("❌ Result: Purchase Unsuccessful")
             elif "Unfortunately your purchase has not been successfully approved" in page_text:
-                send_log("❌ Result: Purchase Unsuccessful (Not Approved)")
+                send_log("❌ Result: Not Approved")
             elif "Order Complete" in page_text or "Thank you" in page_text:
-                send_log("✅ Result: Order Complete / Charge Successful!")
+                send_log("✅ Result: Order Complete!")
             else:
                 send_log("⚠️ Unknown response. Check screenshot.")
 
-            # 17. اسكرين شوت
             screenshot_path = "result_screenshot.png"
             await page.screenshot(path=screenshot_path, full_page=True)
             with open(screenshot_path, 'rb') as photo:
-                bot.send_photo(ADMIN_ID, photo, caption="📸 Final Result Screenshot")
-            send_log("📸 Screenshot sent.")
+                bot.send_photo(ADMIN_ID, photo, caption="📸 Final Result")
             os.remove(screenshot_path)
 
         except Exception as e:
-            error_msg = f"❌ CRITICAL ERROR: {str(e)}"
-            send_log(error_msg)
+            send_log(f"❌ CRITICAL ERROR: {str(e)}")
             try:
-                error_screenshot = "error_screenshot.png"
-                await page.screenshot(path=error_screenshot, full_page=True)
-                with open(error_screenshot, 'rb') as photo:
+                await page.screenshot(path="error_screenshot.png", full_page=True)
+                with open("error_screenshot.png", 'rb') as photo:
                     bot.send_photo(ADMIN_ID, photo, caption="🚨 Error Screenshot")
-                os.remove(error_screenshot)
+                os.remove("error_screenshot.png")
             except Exception as ss_error:
-                send_log(f"Failed to capture error screenshot: {ss_error}")
-
+                send_log(f"Screenshot failed: {ss_error}")
         finally:
             await browser.close()
 
-# ═══════════════════════════════════════════════════════════════════
-# RUNNER
-# ═══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    send_log("🚀 Bot started. Waiting for errors...")
+    send_log("🚀 Bot started.")
     while True:
         try:
             asyncio.run(main())
-            send_log("✅ Process completed successfully.")
-            time.sleep(30) 
+            send_log("✅ Completed.")
+            time.sleep(30)
         except Exception as e:
-            send_log(f"❌ Process crashed: {e}")
+            send_log(f"❌ Crashed: {e}")
             time.sleep(10)
