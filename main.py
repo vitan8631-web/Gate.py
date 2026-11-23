@@ -28,7 +28,6 @@ CUSTOMER = {
     "phone": "20177748870",
 }
 
-# كود المنتج اللي في الصورة الأخيرة
 PRODUCT_CODE = "VER001071" 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -56,7 +55,7 @@ async def main():
         page = await context.new_page()
 
         try:
-            # 1. البحث عن المنتج (بدل الرابط المباشر)
+            # 1. البحث عن المنتج
             send_log("🔍 Searching for product...")
             await page.goto("https://www.stickandcaneshop.co.uk/", wait_until="domcontentloaded", timeout=30000)
             
@@ -78,11 +77,14 @@ async def main():
 
             # 3. إضافة المنتج للسلة
             send_log("➕ Adding product to basket...")
+            
+            # تخطي الكوكيز
             try:
                 cookie_btn = page.locator('button:has-text("Accept All")').first
-                if await cookie_btn.is_visible(timeout=2000):
+                if await cookie_btn.is_visible(timeout=3000):
                     await cookie_btn.click()
                     send_log("🍪 Cookies accepted.")
+                    await page.wait_for_timeout(1000)
             except: pass
 
             add_to_cart_btn = page.locator('button:has-text("Add to Bag"), button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], .add-to-basket, .add-to-cart').first
@@ -106,58 +108,88 @@ async def main():
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # 6. ملء فورم البيانات
+            # 6. الموافقة على الكوكيز (مهم جداً هنا)
+            send_log("🍪 Accepting cookies on checkout page...")
+            try:
+                cookie_btn = page.locator('button:has-text("Accept All")').first
+                if await cookie_btn.is_visible(timeout=3000):
+                    await cookie_btn.click()
+                    send_log("✅ Cookies accepted on checkout.")
+                    await page.wait_for_timeout(1000)
+            except: pass
+
+            # 7. اختيار "I am a new customer" و الضغط على Continue
+            send_log("👤 Selecting 'New Customer'...")
+            try:
+                # بنجرب نختار الـ radio بتاع "I am a new customer"
+                new_customer_radio = page.locator('input[type="radio"][value*="new"], label:has-text("I am a new customer")').first
+                if await new_customer_radio.is_visible(timeout=3000):
+                    await new_customer_radio.click()
+                    send_log("✅ New customer selected.")
+                    await page.wait_for_timeout(1000)
+                
+                # بنضغط على زرار Continue أو Proceed
+                continue_btn = page.locator('button:has-text("Continue"), input[value*="Continue"], button:has-text("Proceed"), input[value*="Proceed"]').first
+                if await continue_btn.is_visible(timeout=3000):
+                    await continue_btn.click()
+                    send_log("✅ Clicked Continue.")
+                    await page.wait_for_load_state("domcontentloaded")
+                    await page.wait_for_timeout(2000)
+            except Exception as e:
+                send_log(f"⚠️ Could not handle customer step: {e}")
+
+            # 8. ملء فورم البيانات (لو ظهر)
             send_log("📝 Filling customer info...")
             
             email_input = page.locator('input[name="email"], input[type="email"]').first
-            if await email_input.is_visible():
+            if await email_input.is_visible(timeout=2000):
                 await email_input.fill(CUSTOMER["email"])
                 send_log("✅ Email filled.")
 
             first_name_input = page.locator('input[name="first_name"], input[name="billing_first_name"]').first
-            if await first_name_input.is_visible():
+            if await first_name_input.is_visible(timeout=2000):
                 await first_name_input.fill(CUSTOMER["first_name"])
                 send_log("✅ First name filled.")
 
             last_name_input = page.locator('input[name="last_name"], input[name="billing_last_name"]').first
-            if await last_name_input.is_visible():
+            if await last_name_input.is_visible(timeout=2000):
                 await last_name_input.fill(CUSTOMER["last_name"])
                 send_log("✅ Last name filled.")
 
             address_input = page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"]').first
-            if await address_input.is_visible():
+            if await address_input.is_visible(timeout=2000):
                 await address_input.fill(CUSTOMER["address"])
                 send_log("✅ Address filled.")
 
             city_input = page.locator('input[name="city"], input[name="billing_city"]').first
-            if await city_input.is_visible():
+            if await city_input.is_visible(timeout=2000):
                 await city_input.fill(CUSTOMER["city"])
                 send_log("✅ City filled.")
 
             postcode_input = page.locator('input[name="postcode"], input[name="billing_postcode"], input[name="zip"]').first
-            if await postcode_input.is_visible():
+            if await postcode_input.is_visible(timeout=2000):
                 await postcode_input.fill(CUSTOMER["postcode"])
                 send_log("✅ Postcode filled.")
 
             phone_input = page.locator('input[name="phone"], input[name="telephone"], input[name="billing_phone"]').first
-            if await phone_input.is_visible():
+            if await phone_input.is_visible(timeout=2000):
                 await phone_input.fill(CUSTOMER["phone"])
                 send_log("✅ Phone filled.")
 
-            # 7. الضغط على Submit & Continue
+            # 9. الضغط على Submit & Continue (لو ظهر)
             send_log("➡️ Clicking Submit & Continue...")
             submit_btn = page.locator('button:has-text("Submit & Continue"), button:has-text("Continue"), input[value*="Submit"]').first
-            if await submit_btn.is_visible():
+            if await submit_btn.is_visible(timeout=2000):
                 await submit_btn.click()
                 await page.wait_for_load_state("domcontentloaded")
                 await page.wait_for_timeout(2000)
 
-            # 8. اختيار الفيزا
+            # 10. اختيار الفيزا
             send_log("💳 Selecting Credit/Debit Card...")
             await page.locator('label:has-text("Credit / Debit Card")').click()
             await page.wait_for_timeout(1500)
 
-            # 9. ملء الكارت
+            # 11. ملء الكارت
             send_log("🔢 Filling card number...")
             frame_number = page.frame_locator('iframe[name="braintree-hosted-field-number"]')
             await frame_number.locator('input').press_sequentially(CARD_NUMBER, delay=20)
@@ -170,22 +202,22 @@ async def main():
             frame_cvv = page.frame_locator('iframe[name="braintree-hosted-field-cvv"]')
             await frame_cvv.locator('input').press_sequentially(CARD_CVC, delay=20)
 
-            # 10. الموافقة على الشروط
+            # 12. الموافقة على الشروط
             send_log("✅ Checking Terms & Conditions...")
             accept_checkbox = page.locator('input[name="accept"]')
-            if await accept_checkbox.is_visible():
+            if await accept_checkbox.is_visible(timeout=2000):
                 await accept_checkbox.check()
                 send_log("✅ Terms accepted.")
 
-            # 11. الضغط على Complete Purchase
+            # 13. الضغط على Complete Purchase
             send_log("🚀 Clicking 'Complete Purchase'...")
             await page.locator('#input_submit').click()
 
-            # 12. استنى الرد
+            # 14. استنى الرد
             send_log("⏳ Waiting for final response...")
             await page.wait_for_timeout(10000)
 
-            # 13. استخراج النتيجة
+            # 15. استخراج النتيجة
             page_text = await page.inner_text("body")
             if "Transaction Not Allowed" in page_text:
                 send_log("❌ Result: Transaction Not Allowed")
@@ -198,7 +230,7 @@ async def main():
             else:
                 send_log("⚠️ Unknown response. Check screenshot.")
 
-            # 14. اسكرين شوت
+            # 16. اسكرين شوت
             screenshot_path = "result_screenshot.png"
             await page.screenshot(path=screenshot_path, full_page=True)
             with open(screenshot_path, 'rb') as photo:
