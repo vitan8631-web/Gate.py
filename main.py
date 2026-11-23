@@ -15,20 +15,23 @@ CARD_CVC = "947"
 
 PRODUCT_URL = "https://www.stickandcaneshop.co.uk/black-rubber-ferrule-for-seat-sticks"
 
-EMAIL_POOL = [
-    "wafabro984@gmail.com",
-    "wafabro975@gmail.com",
-    "wafabro660@gmail.com",
-    "wafabro550@gmail.com",
-    "wafabro440@gmail.com",
+# أسماء أشخاص حقيقية
+REAL_NAMES = [
+    "ahmed", "mohamed", "mahmoud", "mustafa", "khaled", "omar", "youssef",
+    "karim", "hassan", "tarek", "wafa", "sara", "laila", "nour", "mona",
+    "heba", "dina", "aya", "mariam", "salma", "john", "james", "david",
+    "michael", "robert", "william", "thomas", "daniel", "matthew", "joseph",
 ]
-FIRST_NAMES = ["Wafa", "Ahmed", "Mohamed", "Sara", "Laila", "Omar", "Khaled", "Nour"]
-LAST_NAMES = ["Bro", "Ali", "Hassan", "Ibrahim", "Mostafa", "Mahmoud", "Salem", "Farag"]
+
+def generate_email():
+    name = random.choice(REAL_NAMES)
+    number = random.randint(10, 99)
+    return f"{name}{number}@gmail.com"
 
 CUSTOMER = {
     "email": "",
-    "first_name": random.choice(FIRST_NAMES),
-    "last_name": random.choice(LAST_NAMES),
+    "first_name": random.choice(["Ahmed", "Mohamed", "Mahmoud", "Wafa", "Sara", "Laila", "Omar", "Khaled"]),
+    "last_name": random.choice(["Ali", "Hassan", "Ibrahim", "Mostafa", "Mahmoud", "Salem", "Farag"]),
     "address": "Hillside, West Coker Road",
     "city": "West Coker",
     "postcode": "BA22 9AA",
@@ -106,13 +109,9 @@ async def wait_for_any(page, selectors, timeout=8000):
     return None
 
 
-def generate_random_email():
-    return f"wafabro{random.randint(100, 9999)}@gmail.com"
-
-
 async def try_guest_checkout(page, email_locator, guest_btn):
     for attempt in range(6):
-        email = EMAIL_POOL[attempt] if attempt < len(EMAIL_POOL) else generate_random_email()
+        email = generate_email()
         CUSTOMER["email"] = email
         send_log(f"📧 Trying email: {email} (attempt {attempt+1})")
         
@@ -121,10 +120,8 @@ async def try_guest_checkout(page, email_locator, guest_btn):
         await page.wait_for_timeout(1000)
         
         await guest_btn.click(force=True)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
-        except:
-            await page.wait_for_timeout(5000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_timeout(2000)
         
         error_popup = page.locator('text="Please check the email address"')
         if await error_popup.count() > 0 and await error_popup.first.is_visible():
@@ -225,31 +222,16 @@ async def main():
             successful_email = await try_guest_checkout(page, email_locator, guest_btn)
             send_log(f"✅ Guest checkout successful with: {successful_email}")
 
-            send_log("⏳ Waiting for shipping form in DOM...")
-            try:
-                await page.wait_for_selector(
-                    'input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]',
-                    state="attached",
-                    timeout=20000
-                )
-                send_log("✅ Shipping form found in DOM.")
-            except:
-                html = await page.content()
-                send_log(f"📄 Current URL: {page.url}")
-                send_log(f"📄 HTML snippet: {html[:500]}")
-                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر في الـ DOM")
-                raise Exception("Shipping form not found in DOM")
-
-            send_log("🍪 Removing cookies banner...")
-            await accept_cookies(page)
-            await page.wait_for_timeout(2000)
-
             send_log("📝 Filling customer info...")
             await page.wait_for_timeout(2000)
 
             first_name_loc = page.locator(
                 'input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]'
             ).first
+            if not await first_name_loc.count() > 0:
+                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر")
+                raise Exception("Shipping form not found")
+
             await first_name_loc.fill(CUSTOMER["first_name"], force=True)
             await page.locator('input[name="last_name"], input[name="billing_last_name"], input[name="lastName"]').first.fill(CUSTOMER["last_name"], force=True)
             await page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"], input[name="addressLine1"]').first.fill(CUSTOMER["address"], force=True)
