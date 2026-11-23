@@ -1,3 +1,2 @@
-asyncio
-telebot
 playwright
+pyTelegramBotAPI
