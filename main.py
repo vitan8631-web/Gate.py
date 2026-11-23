@@ -5,7 +5,7 @@ import random
 from playwright.async_api import async_playwright
 import telebot
 
-BOT_TOKEN = '8407490230:AAHjhQCu-k7Y6VcvzWKyQiNXnOUJabQgmVg'
+BOT_TOKEN = '8407490230:AAF3AXyYqAdkVg34orbBVj2NvCuOhKTPfk0'
 ADMIN_ID = 6843321125
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -22,15 +22,19 @@ REAL_NAMES = [
     "michael", "robert", "william", "thomas", "daniel", "matthew", "joseph",
 ]
 
+LAST_NAMES = ["Ali", "Hassan", "Ibrahim", "Mostafa", "Mahmoud", "Salem", "Farag", "Smith", "Johnson", "Brown", "Davis", "Miller"]
+
 def generate_email():
-    name = random.choice(REAL_NAMES)
-    number = random.randint(10, 99)
-    return f"{name}{number}@gmail.com"
+    first = random.choice(REAL_NAMES).capitalize()
+    last = random.choice(LAST_NAMES).capitalize()
+    number = random.randint(100, 9999)
+    domains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com"]
+    return f"{first}.{last}.{number}@{random.choice(domains)}"
 
 CUSTOMER = {
     "email": "",
     "first_name": random.choice(["Ahmed", "Mohamed", "Mahmoud", "Wafa", "Sara", "Laila", "Omar", "Khaled"]),
-    "last_name": random.choice(["Ali", "Hassan", "Ibrahim", "Mostafa", "Mahmoud", "Salem", "Farag"]),
+    "last_name": random.choice(LAST_NAMES),
     "address": "Hillside, West Coker Road",
     "city": "West Coker",
     "postcode": "BA22 9AA",
@@ -118,7 +122,7 @@ async def try_guest_checkout(page, email_locator, guest_btn):
         await email_locator.fill("", force=True)
         await email_locator.fill(email, force=True)
         await guest_btn.click(force=True)
-        await page.wait_for_timeout(2500)
+        await page.wait_for_timeout(3000)  # زيادة وقت الانتظار
 
         error_popup = page.locator('text="Please check the email address"')
         if await error_popup.count() > 0 and await error_popup.first.is_visible():
@@ -126,7 +130,7 @@ async def try_guest_checkout(page, email_locator, guest_btn):
             ok_btn = page.locator('button:has-text("OK"), .modal button, .popup button').first
             if await ok_btn.count() > 0:
                 await ok_btn.click(force=True)
-                await page.wait_for_timeout(800)
+                await page.wait_for_timeout(1000)
             # نتأكد إن حقل الإيميل لسه موجود
             email_locator = await wait_for_any(
                 page,
@@ -228,7 +232,7 @@ async def main():
             send_log(f"✅ Guest checkout successful with: {successful_email}")
 
             send_log("📝 Filling customer info...")
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(4000)  # زيادة وقت الانتظار بعد Guest
 
             first_name_loc = page.locator(
                 'input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]'
