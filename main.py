@@ -17,7 +17,7 @@ CARD_NUMBER = "4059986126444431"
 CARD_EXPIRY = "11/30"
 CARD_CVC = "947"
 
-# بيانات العميل (عشان الفورم)
+# بيانات العميل
 CUSTOMER = {
     "email": "wafabro6576@gmail.com",
     "first_name": "Wafa",
@@ -27,6 +27,8 @@ CUSTOMER = {
     "postcode": "BA22 9AA",
     "phone": "20177748870",
 }
+
+PRODUCT_CODE = "VER001070"
 
 # ═══════════════════════════════════════════════════════════════════
 # LOGGING
@@ -45,8 +47,8 @@ def send_log(msg):
 
 async def main():
     async with async_playwright() as p:
-        # تشغيل المتصفح (headless=False عشان تشوفه، أو True للسرعة)
-        browser = await p.chromium.launch(headless=True, slow_mo=100)
+        # headless=True عشان أسرع على السيرفر، بس ممكن تخليها False لو عايز تشوف
+        browser = await p.chromium.launch(headless=True, slow_mo=50)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915},
@@ -54,27 +56,40 @@ async def main():
         page = await context.new_page()
 
         try:
-            # 1. البحث عن المنتج
+            # 1. فتح الموقع والبحث
             send_log("🔍 Searching for product...")
             await page.goto("https://www.stickandcaneshop.co.uk/", wait_until="domcontentloaded", timeout=30000)
             
             # كتابة كود المنتج في خانة البحث
             search_input = page.locator('input[name="for"]').first
-            await search_input.fill("VER001070")
+            await search_input.fill(PRODUCT_CODE)
             await search_input.press("Enter")
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
 
             # 2. الضغط على المنتج اللي ظهر
             send_log("🛒 Opening product page...")
-            product_link = page.locator('a:has-text("Small Replacement Rubber Tip")').first
-            await product_link.click()
+            # بندور على أي رابط فيه كود المنتج أو كلمة Rubber Tip
+            product_link = page.locator(f'a:has-text("{PRODUCT_CODE}"), a:has-text("Rubber Tip"), a:has-text("Veritas Ferrule")').first
+            if await product_link.is_visible():
+                await product_link.click()
+            else:
+                send_log("⚠️ Product link not found, trying direct URL...")
+                await page.goto("https://www.stickandcaneshop.co.uk/rubber-tip-for-veritas-ferrule/", wait_until="domcontentloaded", timeout=30000)
+            
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(1000)
 
             # 3. إضافة المنتج للسلة
             send_log("➕ Adding product to basket...")
-            add_to_cart_btn = page.locator('button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], input[value*="Add to Cart"]').first
+            # لو فيه Accept All Cookies، بنضغطها عشان ميعطلش
+            try:
+                cookie_btn = page.locator('button:has-text("Accept All")').first
+                if await cookie_btn.is_visible(timeout=2000):
+                    await cookie_btn.click()
+            except: pass
+
+            add_to_cart_btn = page.locator('button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], input[value*="Add to Cart"], .add-to-basket').first
             await add_to_cart_btn.click()
             await page.wait_for_timeout(1500)
 
@@ -90,7 +105,7 @@ async def main():
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # 6. ملء فورم البيانات (لو ظهر)
+            # 6. ملء فورم البيانات
             send_log("📝 Filling customer info...")
             
             # الإيميل
@@ -135,7 +150,7 @@ async def main():
                 await phone_input.fill(CUSTOMER["phone"])
                 send_log("✅ Phone filled.")
 
-            # 7. الضغط على "Submit & Continue"
+            # 7. الضغط على Submit & Continue
             send_log("➡️ Clicking Submit & Continue...")
             submit_btn = page.locator('button:has-text("Submit & Continue"), button:has-text("Continue"), input[value*="Submit"]').first
             if await submit_btn.is_visible():
@@ -168,7 +183,7 @@ async def main():
                 await accept_checkbox.check()
                 send_log("✅ Terms accepted.")
 
-            # 11. الضغط على "Complete Purchase"
+            # 11. الضغط على Complete Purchase
             send_log("🚀 Clicking 'Complete Purchase'...")
             await page.locator('#input_submit').click()
 
@@ -222,7 +237,8 @@ if __name__ == "__main__":
         try:
             asyncio.run(main())
             send_log("✅ Process completed successfully.")
-            break # يخرج من الـ loop لو العملية نجحت
+            # ممكن نضيف وقت استراحة هنا بين كل عملية والتانية
+            time.sleep(30) 
         except Exception as e:
             send_log(f"❌ Process crashed: {e}")
             time.sleep(10)
