@@ -15,7 +15,6 @@ CARD_CVC = "947"
 
 PRODUCT_URL = "https://www.stickandcaneshop.co.uk/black-rubber-ferrule-for-seat-sticks"
 
-# قوائم عشوائية
 EMAIL_POOL = [
     "wafabro984@gmail.com",
     "wafabro975@gmail.com",
@@ -27,7 +26,7 @@ FIRST_NAMES = ["Wafa", "Ahmed", "Mohamed", "Sara", "Laila", "Omar", "Khaled", "N
 LAST_NAMES = ["Bro", "Ali", "Hassan", "Ibrahim", "Mostafa", "Mahmoud", "Salem", "Farag"]
 
 CUSTOMER = {
-    "email": "",  # هيتحدد ديناميكياً
+    "email": "",
     "first_name": random.choice(FIRST_NAMES),
     "last_name": random.choice(LAST_NAMES),
     "address": "Hillside, West Coker Road",
@@ -112,7 +111,6 @@ def generate_random_email():
 
 
 async def try_guest_checkout(page, email_locator, guest_btn):
-    """يحاول يضغط Guest مع إيميلات مختلفة لحد ما يعدي"""
     for attempt in range(6):
         email = EMAIL_POOL[attempt] if attempt < len(EMAIL_POOL) else generate_random_email()
         CUSTOMER["email"] = email
@@ -123,8 +121,10 @@ async def try_guest_checkout(page, email_locator, guest_btn):
         await page.wait_for_timeout(1000)
         
         await guest_btn.click(force=True)
-        await page.wait_for_load_state("domcontentloaded")
-        await page.wait_for_timeout(3000)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except:
+            await page.wait_for_timeout(5000)
         
         error_popup = page.locator('text="Please check the email address"')
         if await error_popup.count() > 0 and await error_popup.first.is_visible():
@@ -222,26 +222,34 @@ async def main():
             if not guest_btn:
                 raise Exception("Guest button not found")
 
-            # 🔁 محاولة الإيميلات
             successful_email = await try_guest_checkout(page, email_locator, guest_btn)
             send_log(f"✅ Guest checkout successful with: {successful_email}")
+
+            send_log("⏳ Waiting for shipping form in DOM...")
+            try:
+                await page.wait_for_selector(
+                    'input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]',
+                    state="attached",
+                    timeout=20000
+                )
+                send_log("✅ Shipping form found in DOM.")
+            except:
+                html = await page.content()
+                send_log(f"📄 Current URL: {page.url}")
+                send_log(f"📄 HTML snippet: {html[:500]}")
+                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر في الـ DOM")
+                raise Exception("Shipping form not found in DOM")
 
             send_log("🍪 Removing cookies banner...")
             await accept_cookies(page)
             await page.wait_for_timeout(2000)
 
             send_log("📝 Filling customer info...")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2000)
 
             first_name_loc = page.locator(
                 'input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]'
             ).first
-            try:
-                await first_name_loc.wait_for(state="attached", timeout=15000)
-            except:
-                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر في الـ DOM")
-                raise Exception("Shipping form not found in DOM")
-
             await first_name_loc.fill(CUSTOMER["first_name"], force=True)
             await page.locator('input[name="last_name"], input[name="billing_last_name"], input[name="lastName"]').first.fill(CUSTOMER["last_name"], force=True)
             await page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"], input[name="addressLine1"]').first.fill(CUSTOMER["address"], force=True)
