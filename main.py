@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import random
 from playwright.async_api import async_playwright
 import telebot
 
@@ -12,17 +13,28 @@ CARD_NUMBER = "4059986126444431"
 CARD_EXPIRY = "11/30"
 CARD_CVC = "947"
 
+PRODUCT_URL = "https://www.stickandcaneshop.co.uk/black-rubber-ferrule-for-seat-sticks"
+
+# قوائم عشوائية
+EMAIL_POOL = [
+    "wafabro984@gmail.com",
+    "wafabro975@gmail.com",
+    "wafabro660@gmail.com",
+    "wafabro550@gmail.com",
+    "wafabro440@gmail.com",
+]
+FIRST_NAMES = ["Wafa", "Ahmed", "Mohamed", "Sara", "Laila", "Omar", "Khaled", "Nour"]
+LAST_NAMES = ["Bro", "Ali", "Hassan", "Ibrahim", "Mostafa", "Mahmoud", "Salem", "Farag"]
+
 CUSTOMER = {
-    "email": "wafabro6576@gmail.com",
-    "first_name": "Wafa",
-    "last_name": "Bro",
+    "email": "",  # هيتحدد ديناميكياً
+    "first_name": random.choice(FIRST_NAMES),
+    "last_name": random.choice(LAST_NAMES),
     "address": "Hillside, West Coker Road",
     "city": "West Coker",
     "postcode": "BA22 9AA",
     "phone": "20177748870",
 }
-
-PRODUCT_URL = "https://www.stickandcaneshop.co.uk/black-rubber-ferrule-for-seat-sticks"
 
 
 def send_log(msg):
@@ -95,6 +107,40 @@ async def wait_for_any(page, selectors, timeout=8000):
     return None
 
 
+def generate_random_email():
+    return f"wafabro{random.randint(100, 9999)}@gmail.com"
+
+
+async def try_guest_checkout(page, email_locator, guest_btn):
+    """يحاول يضغط Guest مع إيميلات مختلفة لحد ما يعدي"""
+    for attempt in range(6):
+        email = EMAIL_POOL[attempt] if attempt < len(EMAIL_POOL) else generate_random_email()
+        CUSTOMER["email"] = email
+        send_log(f"📧 Trying email: {email} (attempt {attempt+1})")
+        
+        await email_locator.fill("", force=True)
+        await email_locator.fill(email, force=True)
+        await page.wait_for_timeout(1000)
+        
+        await guest_btn.click(force=True)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_timeout(3000)
+        
+        error_popup = page.locator('text="Please check the email address"')
+        if await error_popup.count() > 0 and await error_popup.first.is_visible():
+            send_log(f"⚠️ Email rejected: {email}")
+            ok_btn = page.locator('button:has-text("OK"), .modal button, .popup button').first
+            if await ok_btn.count() > 0:
+                await ok_btn.click(force=True)
+                await page.wait_for_timeout(1000)
+            continue
+        
+        send_log(f"✅ Email accepted: {email}")
+        return email
+    
+    raise Exception("All email attempts failed")
+
+
 async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, slow_mo=50)
@@ -164,10 +210,6 @@ async def main():
                 await safe_screenshot(page, "no_email.png", "🚨 حقل الإيميل مش ظهر")
                 raise Exception("Email input not found")
 
-            await email_locator.fill(CUSTOMER["email"], force=True)
-            send_log("✅ Email filled.")
-            await page.wait_for_timeout(1000)
-
             send_log("🚶 Choosing 'Checkout as a Guest'...")
             guest_btn = await wait_for_any(
                 page,
@@ -177,25 +219,12 @@ async def main():
                  'button:has-text("Guest")'],
                 timeout=8000,
             )
-            if guest_btn:
-                await guest_btn.click(force=True)
-                await page.wait_for_load_state("domcontentloaded")
-                await page.wait_for_timeout(3000)
-
-                # لو ظهرت رسالة خطأ الإيميل، نضغط Guest تاني
-                error_popup = page.locator('text="Please check the email address"')
-                if await error_popup.count() > 0 and await error_popup.first.is_visible():
-                    send_log("⚠️ Email warning appeared, clicking Guest again...")
-                    ok_btn = page.locator('button:has-text("OK"), .modal button, .popup button').first
-                    if await ok_btn.count() > 0:
-                        await ok_btn.click(force=True)
-                        await page.wait_for_timeout(1000)
-                    await guest_btn.click(force=True)
-                    await page.wait_for_timeout(4000)
-
-                send_log("✅ Guest checkout selected.")
-            else:
+            if not guest_btn:
                 raise Exception("Guest button not found")
+
+            # 🔁 محاولة الإيميلات
+            successful_email = await try_guest_checkout(page, email_locator, guest_btn)
+            send_log(f"✅ Guest checkout successful with: {successful_email}")
 
             send_log("🍪 Removing cookies banner...")
             await accept_cookies(page)
