@@ -22,7 +22,6 @@ CUSTOMER = {
     "phone": "20177748870",
 }
 
-# الرابط المباشر للمنتج
 PRODUCT_URL = "https://www.stickandcaneshop.co.uk/black-rubber-ferrule-for-seat-sticks"
 
 
@@ -169,32 +168,30 @@ async def main():
             else:
                 raise Exception("Guest button not found")
 
+            send_log("🍪 Closing cookies again...")
+            await accept_cookies(page)
+            await page.wait_for_timeout(2000)
+
             send_log("📝 Filling customer info...")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2000)
 
             first_name_input = page.locator(
                 'input[name="first_name"], input[name="billing_first_name"]'
             ).first
             if not await first_name_input.is_visible(timeout=10000):
-                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر")
-                raise Exception("Shipping form not found")
+                try:
+                    await first_name_input.fill(CUSTOMER["first_name"], force=True)
+                    send_log("⚠️ Used force fill for first name")
+                except:
+                    await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر")
+                    raise Exception("Shipping form not found")
 
-            await first_name_input.fill(CUSTOMER["first_name"])
-            await page.locator(
-                'input[name="last_name"], input[name="billing_last_name"]'
-            ).first.fill(CUSTOMER["last_name"])
-            await page.locator(
-                'input[name="address1"], input[name="billing_address1"], input[name="address"]'
-            ).first.fill(CUSTOMER["address"])
-            await page.locator(
-                'input[name="city"], input[name="billing_city"]'
-            ).first.fill(CUSTOMER["city"])
-            await page.locator(
-                'input[name="postcode"], input[name="billing_postcode"], input[name="zip"]'
-            ).first.fill(CUSTOMER["postcode"])
-            await page.locator(
-                'input[name="phone"], input[name="telephone"], input[name="billing_phone"]'
-            ).first.fill(CUSTOMER["phone"])
+            await first_name_input.fill(CUSTOMER["first_name"], force=True)
+            await page.locator('input[name="last_name"], input[name="billing_last_name"]').first.fill(CUSTOMER["last_name"], force=True)
+            await page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"]').first.fill(CUSTOMER["address"], force=True)
+            await page.locator('input[name="city"], input[name="billing_city"]').first.fill(CUSTOMER["city"], force=True)
+            await page.locator('input[name="postcode"], input[name="billing_postcode"], input[name="zip"]').first.fill(CUSTOMER["postcode"], force=True)
+            await page.locator('input[name="phone"], input[name="telephone"], input[name="billing_phone"]').first.fill(CUSTOMER["phone"], force=True)
             send_log("✅ Customer form filled.")
 
             send_log("➡️ Submitting form...")
