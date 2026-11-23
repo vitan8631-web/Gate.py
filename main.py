@@ -77,8 +77,6 @@ async def main():
 
             # 3. إضافة المنتج للسلة
             send_log("➕ Adding product to basket...")
-            
-            # تخطي الكوكيز
             try:
                 cookie_btn = page.locator('button:has-text("Accept All")').first
                 if await cookie_btn.is_visible(timeout=3000):
@@ -108,7 +106,7 @@ async def main():
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # 6. الموافقة على الكوكيز (مهم جداً هنا)
+            # 6. الموافقة على الكوكيز
             send_log("🍪 Accepting cookies on checkout page...")
             try:
                 cookie_btn = page.locator('button:has-text("Accept All")').first
@@ -118,28 +116,33 @@ async def main():
                     await page.wait_for_timeout(1000)
             except: pass
 
-            # 7. اختيار "I am a new customer" و الضغط على Continue
+            # 7. اختيار "I am a new customer" والضغط على Continue
             send_log("👤 Selecting 'New Customer'...")
             try:
-                # بنجرب نختار الـ radio بتاع "I am a new customer"
                 new_customer_radio = page.locator('input[type="radio"][value*="new"], label:has-text("I am a new customer")').first
                 if await new_customer_radio.is_visible(timeout=3000):
                     await new_customer_radio.click()
                     send_log("✅ New customer selected.")
                     await page.wait_for_timeout(1000)
-                
-                # بنضغط على زرار Continue أو Proceed
+            except: pass
+
+            # 8. الضغط على Continue بعد اختيار New Customer
+            send_log("➡️ Clicking Continue after selecting new customer...")
+            try:
                 continue_btn = page.locator('button:has-text("Continue"), input[value*="Continue"], button:has-text("Proceed"), input[value*="Proceed"]').first
                 if await continue_btn.is_visible(timeout=3000):
                     await continue_btn.click()
-                    send_log("✅ Clicked Continue.")
+                    send_log("✅ Clicked Continue after new customer.")
                     await page.wait_for_load_state("domcontentloaded")
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(3000)  # استنى الصفحة الجديدة تحمل
             except Exception as e:
-                send_log(f"⚠️ Could not handle customer step: {e}")
+                send_log(f"⚠️ Could not click Continue: {e}")
 
-            # 8. ملء فورم البيانات (لو ظهر)
+            # 9. ملء فورم البيانات (اللي هيظهر بعد Continue)
             send_log("📝 Filling customer info...")
+            
+            # استنى شوية عشان الفورم يظهر
+            await page.wait_for_timeout(2000)
             
             email_input = page.locator('input[name="email"], input[type="email"]').first
             if await email_input.is_visible(timeout=2000):
@@ -176,20 +179,20 @@ async def main():
                 await phone_input.fill(CUSTOMER["phone"])
                 send_log("✅ Phone filled.")
 
-            # 9. الضغط على Submit & Continue (لو ظهر)
-            send_log("➡️ Clicking Submit & Continue...")
+            # 10. الضغط على Submit & Continue (بعد ملء الفورم)
+            send_log("➡️ Clicking Submit & Continue after filling form...")
             submit_btn = page.locator('button:has-text("Submit & Continue"), button:has-text("Continue"), input[value*="Submit"]').first
             if await submit_btn.is_visible(timeout=2000):
                 await submit_btn.click()
                 await page.wait_for_load_state("domcontentloaded")
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(3000)  # استنى صفحة الدفع
 
-            # 10. اختيار الفيزا
+            # 11. اختيار الفيزا
             send_log("💳 Selecting Credit/Debit Card...")
             await page.locator('label:has-text("Credit / Debit Card")').click()
             await page.wait_for_timeout(1500)
 
-            # 11. ملء الكارت
+            # 12. ملء الكارت
             send_log("🔢 Filling card number...")
             frame_number = page.frame_locator('iframe[name="braintree-hosted-field-number"]')
             await frame_number.locator('input').press_sequentially(CARD_NUMBER, delay=20)
@@ -202,22 +205,22 @@ async def main():
             frame_cvv = page.frame_locator('iframe[name="braintree-hosted-field-cvv"]')
             await frame_cvv.locator('input').press_sequentially(CARD_CVC, delay=20)
 
-            # 12. الموافقة على الشروط
+            # 13. الموافقة على الشروط
             send_log("✅ Checking Terms & Conditions...")
             accept_checkbox = page.locator('input[name="accept"]')
             if await accept_checkbox.is_visible(timeout=2000):
                 await accept_checkbox.check()
                 send_log("✅ Terms accepted.")
 
-            # 13. الضغط على Complete Purchase
+            # 14. الضغط على Complete Purchase
             send_log("🚀 Clicking 'Complete Purchase'...")
             await page.locator('#input_submit').click()
 
-            # 14. استنى الرد
+            # 15. استنى الرد
             send_log("⏳ Waiting for final response...")
             await page.wait_for_timeout(10000)
 
-            # 15. استخراج النتيجة
+            # 16. استخراج النتيجة
             page_text = await page.inner_text("body")
             if "Transaction Not Allowed" in page_text:
                 send_log("❌ Result: Transaction Not Allowed")
@@ -230,7 +233,7 @@ async def main():
             else:
                 send_log("⚠️ Unknown response. Check screenshot.")
 
-            # 16. اسكرين شوت
+            # 17. اسكرين شوت
             screenshot_path = "result_screenshot.png"
             await page.screenshot(path=screenshot_path, full_page=True)
             with open(screenshot_path, 'rb') as photo:
