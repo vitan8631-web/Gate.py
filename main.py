@@ -28,10 +28,8 @@ CUSTOMER = {
     "phone": "20177748870",
 }
 
-# غيرنا الكود هنا للمنتج اللي في الصورة
+# كود المنتج اللي في الصورة الأخيرة
 PRODUCT_CODE = "VER001071" 
-# الرابط المباشر لو عرفناه (اختياري)
-PRODUCT_DIRECT_URL = "https://www.stickandcaneshop.co.uk/large-replacement-rubber-tip-for-medium-large-veritas-ferrule/" 
 
 # ═══════════════════════════════════════════════════════════════════
 # LOGGING
@@ -58,15 +56,28 @@ async def main():
         page = await context.new_page()
 
         try:
-            # 1. الدخول المباشر لصفحة المنتج (لتوفير الوقت وتجنب مشاكل البحث)
-            send_log("🛒 Opening product page directly...")
-            await page.goto(PRODUCT_DIRECT_URL, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(2000)
-
-            # 2. إضافة المنتج للسلة
-            send_log("➕ Adding product to basket...")
+            # 1. البحث عن المنتج (بدل الرابط المباشر)
+            send_log("🔍 Searching for product...")
+            await page.goto("https://www.stickandcaneshop.co.uk/", wait_until="domcontentloaded", timeout=30000)
             
-            # تخطي الكوكيز
+            search_input = page.locator('input[name="for"]').first
+            await search_input.fill(PRODUCT_CODE)
+            await search_input.press("Enter")
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_timeout(3000)
+
+            # 2. الضغط على المنتج
+            send_log("🛒 Opening product page...")
+            product_link = page.locator(f'a:has-text("{PRODUCT_CODE}"), a:has-text("Rubber Tip")').first
+            if await product_link.is_visible():
+                await product_link.click()
+                await page.wait_for_load_state("domcontentloaded")
+                await page.wait_for_timeout(2000)
+            else:
+                raise Exception("Product link not found")
+
+            # 3. إضافة المنتج للسلة
+            send_log("➕ Adding product to basket...")
             try:
                 cookie_btn = page.locator('button:has-text("Accept All")').first
                 if await cookie_btn.is_visible(timeout=2000):
@@ -74,31 +85,28 @@ async def main():
                     send_log("🍪 Cookies accepted.")
             except: pass
 
-            # الضغط على Add to Bag
             add_to_cart_btn = page.locator('button:has-text("Add to Bag"), button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], .add-to-basket, .add-to-cart').first
             await add_to_cart_btn.click()
             await page.wait_for_timeout(2000)
 
-            # 3. الذهاب للسلة
+            # 4. الذهاب للسلة
             send_log("🛒 Going to basket...")
             await page.goto("https://www.stickandcaneshop.co.uk/basket", wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(2000)
 
-            # 4. الضغط على Checkout
+            # 5. الضغط على Checkout
             send_log("👉 Clicking Checkout...")
-            # بندور على أي زرار أو رابط فيه كلمة Checkout
             checkout_btn = page.locator('a:has-text("Checkout"), button:has-text("Checkout"), input[value*="Checkout"], .checkout-button, #checkout').first
             if await checkout_btn.is_visible():
                 await checkout_btn.click()
             else:
-                # لو ملقاش الزرار، ممكن يكون رابط مباشر
                 send_log("⚠️ Checkout button not found, trying direct URL...")
                 await page.goto("https://www.stickandcaneshop.co.uk/checkout", wait_until="domcontentloaded", timeout=30000)
 
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # 5. ملء فورم البيانات
+            # 6. ملء فورم البيانات
             send_log("📝 Filling customer info...")
             
             email_input = page.locator('input[name="email"], input[type="email"]').first
@@ -136,7 +144,7 @@ async def main():
                 await phone_input.fill(CUSTOMER["phone"])
                 send_log("✅ Phone filled.")
 
-            # 6. الضغط على Submit & Continue
+            # 7. الضغط على Submit & Continue
             send_log("➡️ Clicking Submit & Continue...")
             submit_btn = page.locator('button:has-text("Submit & Continue"), button:has-text("Continue"), input[value*="Submit"]').first
             if await submit_btn.is_visible():
@@ -144,12 +152,12 @@ async def main():
                 await page.wait_for_load_state("domcontentloaded")
                 await page.wait_for_timeout(2000)
 
-            # 7. اختيار الفيزا
+            # 8. اختيار الفيزا
             send_log("💳 Selecting Credit/Debit Card...")
             await page.locator('label:has-text("Credit / Debit Card")').click()
             await page.wait_for_timeout(1500)
 
-            # 8. ملء الكارت
+            # 9. ملء الكارت
             send_log("🔢 Filling card number...")
             frame_number = page.frame_locator('iframe[name="braintree-hosted-field-number"]')
             await frame_number.locator('input').press_sequentially(CARD_NUMBER, delay=20)
@@ -162,22 +170,22 @@ async def main():
             frame_cvv = page.frame_locator('iframe[name="braintree-hosted-field-cvv"]')
             await frame_cvv.locator('input').press_sequentially(CARD_CVC, delay=20)
 
-            # 9. الموافقة على الشروط
+            # 10. الموافقة على الشروط
             send_log("✅ Checking Terms & Conditions...")
             accept_checkbox = page.locator('input[name="accept"]')
             if await accept_checkbox.is_visible():
                 await accept_checkbox.check()
                 send_log("✅ Terms accepted.")
 
-            # 10. الضغط على Complete Purchase
+            # 11. الضغط على Complete Purchase
             send_log("🚀 Clicking 'Complete Purchase'...")
             await page.locator('#input_submit').click()
 
-            # 11. استنى الرد
+            # 12. استنى الرد
             send_log("⏳ Waiting for final response...")
             await page.wait_for_timeout(10000)
 
-            # 12. استخراج النتيجة
+            # 13. استخراج النتيجة
             page_text = await page.inner_text("body")
             if "Transaction Not Allowed" in page_text:
                 send_log("❌ Result: Transaction Not Allowed")
@@ -190,7 +198,7 @@ async def main():
             else:
                 send_log("⚠️ Unknown response. Check screenshot.")
 
-            # 13. اسكرين شوت
+            # 14. اسكرين شوت
             screenshot_path = "result_screenshot.png"
             await page.screenshot(path=screenshot_path, full_page=True)
             with open(screenshot_path, 'rb') as photo:
