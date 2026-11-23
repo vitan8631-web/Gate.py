@@ -15,7 +15,6 @@ CARD_CVC = "947"
 
 PRODUCT_URL = "https://www.stickandcaneshop.co.uk/black-rubber-ferrule-for-seat-sticks"
 
-# أسماء أشخاص حقيقية
 REAL_NAMES = [
     "ahmed", "mohamed", "mahmoud", "mustafa", "khaled", "omar", "youssef",
     "karim", "hassan", "tarek", "wafa", "sara", "laila", "nour", "mona",
@@ -81,7 +80,7 @@ async def accept_cookies(page):
             btn = page.locator(sel).first
             if await btn.count() > 0 and await btn.is_visible(timeout=2000):
                 await btn.click(force=True)
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(800)
                 return True
         except Exception:
             pass
@@ -114,27 +113,33 @@ async def try_guest_checkout(page, email_locator, guest_btn):
         email = generate_email()
         CUSTOMER["email"] = email
         send_log(f"📧 Trying email: {email} (attempt {attempt+1})")
-        
+
+        # نكتب الإيميل ونضغط Guest على طول
         await email_locator.fill("", force=True)
         await email_locator.fill(email, force=True)
-        await page.wait_for_timeout(1000)
-        
         await guest_btn.click(force=True)
-        await page.wait_for_load_state("domcontentloaded")
-        await page.wait_for_timeout(2000)
-        
+        await page.wait_for_timeout(2500)
+
         error_popup = page.locator('text="Please check the email address"')
         if await error_popup.count() > 0 and await error_popup.first.is_visible():
             send_log(f"⚠️ Email rejected: {email}")
             ok_btn = page.locator('button:has-text("OK"), .modal button, .popup button').first
             if await ok_btn.count() > 0:
                 await ok_btn.click(force=True)
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(800)
+            # نتأكد إن حقل الإيميل لسه موجود
+            email_locator = await wait_for_any(
+                page,
+                ['input[name="email"]', 'input[type="email"]', 'input[name="billing_email"]'],
+                timeout=5000,
+            )
+            if not email_locator:
+                raise Exception("Email field disappeared after popup")
             continue
-        
+
         send_log(f"✅ Email accepted: {email}")
         return email
-    
+
     raise Exception("All email attempts failed")
 
 
