@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from playwright.async_api import async_playwright
 import telebot
 
@@ -11,12 +12,21 @@ BOT_TOKEN = '8407490230:AAHjhQCu-k7Y6VcvzWKyQiNXnOUJabQgmVg'
 ADMIN_ID = 6843321125
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# بيانات الكارت
 CARD_NUMBER = "4059986126444431"
 CARD_EXPIRY = "11/30"
 CARD_CVC = "947"
 
-# رابط المنتج
-PRODUCT_URL = "https://www.stickandcaneshop.co.uk/small-replacement-rubber-tip-for-veritas-ferrule/"
+# بيانات العميل (عشان الفورم)
+CUSTOMER = {
+    "email": "wafabro6576@gmail.com",
+    "first_name": "Wafa",
+    "last_name": "Bro",
+    "address": "Hillside, West Coker Road",
+    "city": "West Coker",
+    "postcode": "BA22 9AA",
+    "phone": "20177748870",
+}
 
 # ═══════════════════════════════════════════════════════════════════
 # LOGGING
@@ -30,12 +40,13 @@ def send_log(msg):
         print(f"Telegram error: {e}")
 
 # ═══════════════════════════════════════════════════════════════════
-# MAIN
+# MAIN SCRIPT
 # ═══════════════════════════════════════════════════════════════════
 
 async def main():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, slow_mo=100)
+        # تشغيل المتصفح (headless=False عشان تشوفه، أو True للسرعة)
+        browser = await p.chromium.launch(headless=True, slow_mo=100)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915},
@@ -43,34 +54,101 @@ async def main():
         page = await context.new_page()
 
         try:
-            # 1. افتح المنتج وأضفه للسلة
-            send_log("🌐 Opening product page...")
-            await page.goto(PRODUCT_URL, wait_until="domcontentloaded", timeout=30000)
+            # 1. البحث عن المنتج
+            send_log("🔍 Searching for product...")
+            await page.goto("https://www.stickandcaneshop.co.uk/", wait_until="domcontentloaded", timeout=30000)
             
-            send_log("🛒 Adding product to basket...")
-            # دور على زرار الإضافة للسلة
+            # كتابة كود المنتج في خانة البحث
+            search_input = page.locator('input[name="for"]').first
+            await search_input.fill("VER001070")
+            await search_input.press("Enter")
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_timeout(2000)
+
+            # 2. الضغط على المنتج اللي ظهر
+            send_log("🛒 Opening product page...")
+            product_link = page.locator('a:has-text("Small Replacement Rubber Tip")').first
+            await product_link.click()
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_timeout(1000)
+
+            # 3. إضافة المنتج للسلة
+            send_log("➕ Adding product to basket...")
             add_to_cart_btn = page.locator('button:has-text("Add to Basket"), button:has-text("Add to Cart"), input[value*="Add to Basket"], input[value*="Add to Cart"]').first
             await add_to_cart_btn.click()
             await page.wait_for_timeout(1500)
 
-            # 2. روح للسلة واضغط Checkout
-            send_log("🛒 Going to Basket...")
+            # 4. الذهاب للسلة
+            send_log("🛒 Going to basket...")
             await page.goto("https://www.stickandcaneshop.co.uk/basket", wait_until="domcontentloaded", timeout=30000)
-            
+            await page.wait_for_timeout(1500)
+
+            # 5. الضغط على Checkout
             send_log("👉 Clicking Checkout...")
             checkout_btn = page.locator('a:has-text("Checkout"), button:has-text("Checkout"), input[value*="Checkout"]').first
             await checkout_btn.click()
-            
-            # استنى صفحة الدفع تحمل
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # 3. اختيار الفيزا
+            # 6. ملء فورم البيانات (لو ظهر)
+            send_log("📝 Filling customer info...")
+            
+            # الإيميل
+            email_input = page.locator('input[name="email"], input[type="email"]').first
+            if await email_input.is_visible():
+                await email_input.fill(CUSTOMER["email"])
+                send_log("✅ Email filled.")
+
+            # الاسم الأول
+            first_name_input = page.locator('input[name="first_name"], input[name="billing_first_name"]').first
+            if await first_name_input.is_visible():
+                await first_name_input.fill(CUSTOMER["first_name"])
+                send_log("✅ First name filled.")
+
+            # الاسم الأخير
+            last_name_input = page.locator('input[name="last_name"], input[name="billing_last_name"]').first
+            if await last_name_input.is_visible():
+                await last_name_input.fill(CUSTOMER["last_name"])
+                send_log("✅ Last name filled.")
+
+            # العنوان
+            address_input = page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"]').first
+            if await address_input.is_visible():
+                await address_input.fill(CUSTOMER["address"])
+                send_log("✅ Address filled.")
+
+            # المدينة
+            city_input = page.locator('input[name="city"], input[name="billing_city"]').first
+            if await city_input.is_visible():
+                await city_input.fill(CUSTOMER["city"])
+                send_log("✅ City filled.")
+
+            # الرمز البريدي
+            postcode_input = page.locator('input[name="postcode"], input[name="billing_postcode"], input[name="zip"]').first
+            if await postcode_input.is_visible():
+                await postcode_input.fill(CUSTOMER["postcode"])
+                send_log("✅ Postcode filled.")
+
+            # التليفون
+            phone_input = page.locator('input[name="phone"], input[name="telephone"], input[name="billing_phone"]').first
+            if await phone_input.is_visible():
+                await phone_input.fill(CUSTOMER["phone"])
+                send_log("✅ Phone filled.")
+
+            # 7. الضغط على "Submit & Continue"
+            send_log("➡️ Clicking Submit & Continue...")
+            submit_btn = page.locator('button:has-text("Submit & Continue"), button:has-text("Continue"), input[value*="Submit"]').first
+            if await submit_btn.is_visible():
+                await submit_btn.click()
+                await page.wait_for_load_state("domcontentloaded")
+                await page.wait_for_timeout(2000)
+
+            # 8. اختيار الفيزا
             send_log("💳 Selecting Credit/Debit Card...")
             await page.locator('label:has-text("Credit / Debit Card")').click()
             await page.wait_for_timeout(1000)
 
-            # 4. ملء الكارت
+            # 9. ملء الكارت
             send_log("🔢 Filling card number...")
             frame_number = page.frame_locator('iframe[name="braintree-hosted-field-number"]')
             await frame_number.locator('input').press_sequentially(CARD_NUMBER, delay=20)
@@ -83,19 +161,22 @@ async def main():
             frame_cvv = page.frame_locator('iframe[name="braintree-hosted-field-cvv"]')
             await frame_cvv.locator('input').press_sequentially(CARD_CVC, delay=20)
 
-            # 5. الموافقة على الشروط
+            # 10. الموافقة على الشروط
             send_log("✅ Checking Terms & Conditions...")
-            await page.locator('input[name="accept"]').check()
+            accept_checkbox = page.locator('input[name="accept"]')
+            if await accept_checkbox.is_visible():
+                await accept_checkbox.check()
+                send_log("✅ Terms accepted.")
 
-            # 6. اضغط على الدفع
+            # 11. الضغط على "Complete Purchase"
             send_log("🚀 Clicking 'Complete Purchase'...")
             await page.locator('#input_submit').click()
 
-            # 7. استنى الرد
+            # 12. استنى الرد
             send_log("⏳ Waiting for final response...")
-            await page.wait_for_timeout(10000)
+            await page.wait_for_timeout(8000)
 
-            # 8. النتيجة
+            # 13. استخراج النتيجة
             page_text = await page.inner_text("body")
             if "Transaction Not Allowed" in page_text:
                 send_log("❌ Result: Transaction Not Allowed")
@@ -108,7 +189,7 @@ async def main():
             else:
                 send_log("⚠️ Unknown response. Check screenshot.")
 
-            # 9. اسكرين شوت
+            # 14. اسكرين شوت
             screenshot_path = "result_screenshot.png"
             await page.screenshot(path=screenshot_path, full_page=True)
             with open(screenshot_path, 'rb') as photo:
@@ -131,5 +212,17 @@ async def main():
         finally:
             await browser.close()
 
+# ═══════════════════════════════════════════════════════════════════
+# RUNNER
+# ═══════════════════════════════════════════════════════════════════
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    send_log("🚀 Bot started. Waiting for errors...")
+    while True:
+        try:
+            asyncio.run(main())
+            send_log("✅ Process completed successfully.")
+            break # يخرج من الـ loop لو العملية نجحت
+        except Exception as e:
+            send_log(f"❌ Process crashed: {e}")
+            time.sleep(10)
