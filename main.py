@@ -22,8 +22,8 @@ CUSTOMER = {
     "phone": "20177748870",
 }
 
-# المنتج الجديد
-PRODUCT_NAME = "Black Rubber Ferrule for Seat Sticks"
+# الرابط المباشر للمنتج
+PRODUCT_URL = "https://www.stickandcaneshop.co.uk/black-rubber-ferrule-for-seat-sticks"
 
 
 def send_log(msg):
@@ -32,6 +32,25 @@ def send_log(msg):
         bot.send_message(ADMIN_ID, f"🤖 <b>Log:</b>\n<code>{msg}</code>", parse_mode='HTML')
     except Exception as e:
         print(f"Telegram error: {e}")
+
+
+async def safe_screenshot(page, path, caption=""):
+    try:
+        await page.screenshot(path=path, full_page=False)
+        if os.path.getsize(path) > 5 * 1024 * 1024:
+            from PIL import Image
+            img = Image.open(path)
+            img.thumbnail((1280, 1280))
+            img.save(path)
+        with open(path, 'rb') as photo:
+            bot.send_photo(ADMIN_ID, photo, caption=caption)
+        os.remove(path)
+    except Exception as e:
+        send_log(f"⚠️ Screenshot failed: {e}")
+        try:
+            os.remove(path)
+        except:
+            pass
 
 
 async def accept_cookies(page):
@@ -73,35 +92,21 @@ async def main():
         page = await context.new_page()
 
         try:
-            send_log("🔍 Searching for product...")
-            await page.goto("https://www.stickandcaneshop.co.uk/",
-                            wait_until="domcontentloaded", timeout=30000)
+            send_log("🔗 Opening product page directly...")
+            await page.goto(PRODUCT_URL, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(2000)
             await accept_cookies(page)
-
-            search_input = page.locator('input[name="for"]').first
-            await search_input.fill("Black Rubber Ferrule")
-            await search_input.press("Enter")
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_timeout(3000)
-
-            send_log("🛒 Opening product page...")
-            product_link = page.locator(
-                f'a:has-text("Black Rubber Ferrule")'
-            ).first
-            if await product_link.is_visible():
-                await product_link.click()
-                await page.wait_for_load_state("domcontentloaded")
-                await page.wait_for_timeout(2000)
-            else:
-                raise Exception("Product link not found")
 
             send_log("➕ Adding product to basket...")
-            await accept_cookies(page)
             add_to_cart_btn = page.locator(
                 'button:has-text("Add to Bag"), button:has-text("Add to Basket"), '
                 'button:has-text("Add to Cart"), input[value*="Add to Basket"], '
                 '.add-to-basket, .add-to-cart'
             ).first
+            if not await add_to_cart_btn.is_visible(timeout=5000):
+                await safe_screenshot(page, "no_add_btn.png", "🚨 زر الإضافة مش ظهر")
+                raise Exception("Add to cart button not found")
+
             await add_to_cart_btn.click()
             await page.wait_for_timeout(2000)
 
@@ -140,10 +145,7 @@ async def main():
                 timeout=10000,
             )
             if not email_locator:
-                await page.screenshot(path="no_email.png", full_page=True)
-                with open("no_email.png", 'rb') as photo:
-                    bot.send_photo(ADMIN_ID, photo, caption="🚨 حقل الإيميل مش ظهر")
-                os.remove("no_email.png")
+                await safe_screenshot(page, "no_email.png", "🚨 حقل الإيميل مش ظهر")
                 raise Exception("Email input not found")
 
             await email_locator.fill(CUSTOMER["email"])
@@ -162,23 +164,19 @@ async def main():
             if guest_btn:
                 await guest_btn.click()
                 await page.wait_for_load_state("domcontentloaded")
-                await page.wait_for_timeout(4000)  # زيادة الانتظار
+                await page.wait_for_timeout(4000)
                 send_log("✅ Guest checkout selected.")
             else:
                 raise Exception("Guest button not found")
 
-            # 10. ملء فورم الشحن - مع انتظار أطول
             send_log("📝 Filling customer info...")
-            await page.wait_for_timeout(3000)  # انتظار إضافي
+            await page.wait_for_timeout(3000)
 
             first_name_input = page.locator(
                 'input[name="first_name"], input[name="billing_first_name"]'
             ).first
-            if not await first_name_input.is_visible(timeout=10000):  # زيادة المهلة
-                await page.screenshot(path="no_form.png", full_page=True)
-                with open("no_form.png", 'rb') as photo:
-                    bot.send_photo(ADMIN_ID, photo, caption="🚨 فورم الشحن مش ظهر")
-                os.remove("no_form.png")
+            if not await first_name_input.is_visible(timeout=10000):
+                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر")
                 raise Exception("Shipping form not found")
 
             await first_name_input.fill(CUSTOMER["first_name"])
@@ -199,7 +197,6 @@ async def main():
             ).first.fill(CUSTOMER["phone"])
             send_log("✅ Customer form filled.")
 
-            # 11. Submit & Continue
             send_log("➡️ Submitting form...")
             submit_btn = page.locator(
                 'button:has-text("Submit & Continue"), button:has-text("Continue"), '
@@ -210,7 +207,6 @@ async def main():
                 await page.wait_for_load_state("domcontentloaded")
                 await page.wait_for_timeout(3000)
 
-            # 12. اختيار الفيزا
             send_log("💳 Selecting Credit/Debit Card...")
             card_label = await wait_for_any(
                 page,
@@ -220,16 +216,12 @@ async def main():
                 timeout=10000,
             )
             if not card_label:
-                await page.screenshot(path="no_card.png", full_page=True)
-                with open("no_card.png", 'rb') as photo:
-                    bot.send_photo(ADMIN_ID, photo, caption="🚨 صفحة الدفع مش ظهر")
-                os.remove("no_card.png")
+                await safe_screenshot(page, "no_card.png", "🚨 صفحة الدفع مش ظهر")
                 raise Exception("Card payment option not found")
 
             await card_label.click()
             await page.wait_for_timeout(1500)
 
-            # 13. ملء الكارت
             send_log("🔢 Filling card...")
             await page.frame_locator(
                 'iframe[name="braintree-hosted-field-number"]'
@@ -261,21 +253,11 @@ async def main():
             else:
                 send_log("⚠️ Unknown response. Check screenshot.")
 
-            screenshot_path = "result_screenshot.png"
-            await page.screenshot(path=screenshot_path, full_page=True)
-            with open(screenshot_path, 'rb') as photo:
-                bot.send_photo(ADMIN_ID, photo, caption="📸 Final Result")
-            os.remove(screenshot_path)
+            await safe_screenshot(page, "result_screenshot.png", "📸 Final Result")
 
         except Exception as e:
             send_log(f"❌ CRITICAL ERROR: {str(e)}")
-            try:
-                await page.screenshot(path="error_screenshot.png", full_page=True)
-                with open("error_screenshot.png", 'rb') as photo:
-                    bot.send_photo(ADMIN_ID, photo, caption="🚨 Error Screenshot")
-                os.remove("error_screenshot.png")
-            except Exception as ss_error:
-                send_log(f"Screenshot failed: {ss_error}")
+            await safe_screenshot(page, "error_screenshot.png", "🚨 Error Screenshot")
         finally:
             await browser.close()
 
