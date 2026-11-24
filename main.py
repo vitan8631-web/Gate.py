@@ -5,7 +5,12 @@ import random
 from playwright.async_api import async_playwright
 import telebot
 
-BOT_TOKEN = '8407490230:AAHjhQCu-k7Y6VcvzWKyQiNXnOUJabQgmVg'
+# ═══════════════════════════════════════════════════════════════════
+# CONFIG — غير التوكن هنا
+# ═══════════════════════════════════════════════════════════════════
+
+# ⚠️ غير التوكن ده بتوكن جديد من BotFather
+BOT_TOKEN = '8407490230:AAF3AXyYqAdkVg34orbBVj2NvCuOhKTPfk0'
 ADMIN_ID = 6843321125
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -117,13 +122,19 @@ async def try_guest_checkout(page, email_locator, guest_btn):
         await email_locator.fill("", force=True)
         await email_locator.fill(email, force=True)
         
-        # نضغط على "Checkout as a Guest"
-        await guest_btn.click(force=True)
-        
-        # نستنى لحد ما الصفحة تتغير (حد أقصى 15 ثانية)
+        # نضغط على "Checkout as a Guest" بطريقة JavaScript
+        send_log("🖱️ Clicking 'Checkout as a Guest' via JS...")
         try:
-            # نستنى ظهور حقل الاسم الأول (بداية فورم الشحن)
-            await page.wait_for_selector('input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]', timeout=15000)
+            await page.evaluate("""
+                const btn = document.querySelector('button:has-text("Checkout as a Guest"), a:has-text("Checkout as a Guest"), input[value*="Guest"]');
+                if (btn) btn.click();
+            """)
+        except:
+            await guest_btn.click(force=True)
+        
+        # نستنى لحد ما الصفحة تتغير (حد أقصى 20 ثانية)
+        try:
+            await page.wait_for_selector('input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]', timeout=20000)
             send_log(f"✅ Shipping form appeared after email: {email}")
             return email
         except:
@@ -135,7 +146,6 @@ async def try_guest_checkout(page, email_locator, guest_btn):
                 if await ok_btn.count() > 0:
                     await ok_btn.click(force=True)
                     await page.wait_for_timeout(1000)
-                # نجيب حقل الإيميل تاني
                 email_locator = await wait_for_any(
                     page,
                     ['input[name="email"]', 'input[type="email"]', 'input[name="billing_email"]'],
@@ -145,7 +155,6 @@ async def try_guest_checkout(page, email_locator, guest_btn):
                     raise Exception("Email field disappeared after popup")
                 continue
             else:
-                # مفيش فورم ومفيش خطأ -> ناخد اسكرين شوت
                 await safe_screenshot(page, "guest_error.png", "🚨 فورم الشحن مش ظهر بعد Guest")
                 raise Exception("Shipping form did not appear")
 
@@ -158,12 +167,13 @@ async def main():
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915},
+            ignore_https_errors=True,
         )
         page = await context.new_page()
 
         try:
             send_log("🔗 Opening product page...")
-            await page.goto(PRODUCT_URL, wait_until="domcontentloaded", timeout=30000)
+            await page.goto(PRODUCT_URL, wait_until="networkidle", timeout=60000)
             await page.wait_for_timeout(3000)
             await accept_cookies(page)
 
@@ -181,7 +191,7 @@ async def main():
 
             send_log("🛒 Going to basket...")
             await page.goto("https://www.stickandcaneshop.co.uk/basket",
-                            wait_until="domcontentloaded", timeout=30000)
+                            wait_until="networkidle", timeout=60000)
             await page.wait_for_timeout(3000)
             await accept_cookies(page)
 
@@ -192,12 +202,12 @@ async def main():
             ).first
             if await checkout_btn.is_visible(timeout=3000):
                 await checkout_btn.click()
-                await page.wait_for_load_state("domcontentloaded")
+                await page.wait_for_load_state("networkidle")
                 await page.wait_for_timeout(3000)
             else:
                 send_log("⚠️ Checkout button not found, trying direct URL...")
                 await page.goto("https://www.stickandcaneshop.co.uk/checkout",
-                                wait_until="domcontentloaded", timeout=30000)
+                                wait_until="networkidle", timeout=60000)
                 await page.wait_for_timeout(3000)
 
             await accept_cookies(page)
@@ -235,7 +245,6 @@ async def main():
 
             send_log("📝 Filling customer info...")
             
-            # استنى شوية إضافية عشان الفورم يظهر
             await page.wait_for_timeout(2000)
 
             first_name_loc = page.locator(
@@ -268,7 +277,7 @@ async def main():
             ).first
             if await submit_btn.count() > 0:
                 await submit_btn.click(force=True)
-                await page.wait_for_load_state("domcontentloaded")
+                await page.wait_for_load_state("networkidle")
                 await page.wait_for_timeout(5000)
 
             send_log("💳 Selecting Credit/Debit Card...")
