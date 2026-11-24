@@ -5,11 +5,7 @@ import random
 from playwright.async_api import async_playwright
 import telebot
 
-# ═══════════════════════════════════════════════════════════════════
-# CONFIG
-# ═══════════════════════════════════════════════════════════════════
-
-BOT_TOKEN = '8407490230:AAF3AXyYqAdkVg34orbBVj2NvCuOhKTPfk0'
+BOT_TOKEN = '8407490230:AAHjhQCu-k7Y6VcvzWKyQiNXnOUJabQgmVg'
 ADMIN_ID = 6843321125
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -43,18 +39,13 @@ CUSTOMER = {
     "phone": "20177748870",
 }
 
-# ═══════════════════════════════════════════════════════════════════
-# LOGGING (بنبعت رسائل أقل عشان نتجنب 429)
-# ═══════════════════════════════════════════════════════════════════
-
 def send_log(msg):
     print(msg)
 
 def send_telegram(msg):
-    """يبعت رسالة تليجرام واحدة بس (مع تأخير)."""
     try:
         bot.send_message(ADMIN_ID, msg, parse_mode='HTML')
-        time.sleep(2)  # تأخير بين الرسائل عشان 429
+        time.sleep(2)
     except Exception as e:
         print(f"Telegram error: {e}")
 
@@ -75,10 +66,6 @@ async def safe_screenshot(page, path, caption=""):
             os.remove(path)
         except:
             pass
-
-# ═══════════════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════════════
 
 async def accept_cookies(page):
     selectors = [
@@ -108,7 +95,6 @@ async def accept_cookies(page):
     except:
         return False
 
-
 async def wait_for_any(page, selectors, timeout=8000):
     deadline = time.time() + timeout / 1000
     while time.time() < deadline:
@@ -122,7 +108,6 @@ async def wait_for_any(page, selectors, timeout=8000):
         await page.wait_for_timeout(300)
     return None
 
-
 async def try_guest_checkout(page, email_locator, guest_btn):
     for attempt in range(6):
         email = generate_email()
@@ -131,33 +116,40 @@ async def try_guest_checkout(page, email_locator, guest_btn):
 
         await email_locator.fill("", force=True)
         await email_locator.fill(email, force=True)
+        
+        # نضغط على "Checkout as a Guest"
         await guest_btn.click(force=True)
-        await page.wait_for_timeout(4000)  # زيادة وقت الانتظار
-
-        error_popup = page.locator('text="Please check the email address"')
-        if await error_popup.count() > 0 and await error_popup.first.is_visible():
-            send_log(f"⚠️ Email rejected: {email}")
-            ok_btn = page.locator('button:has-text("OK"), .modal button, .popup button').first
-            if await ok_btn.count() > 0:
-                await ok_btn.click(force=True)
-                await page.wait_for_timeout(1000)
-            email_locator = await wait_for_any(
-                page,
-                ['input[name="email"]', 'input[type="email"]', 'input[name="billing_email"]'],
-                timeout=5000,
-            )
-            if not email_locator:
-                raise Exception("Email field disappeared after popup")
-            continue
-
-        send_log(f"✅ Email accepted: {email}")
-        return email
+        
+        # نستنى لحد ما الصفحة تتغير (حد أقصى 15 ثانية)
+        try:
+            # نستنى ظهور حقل الاسم الأول (بداية فورم الشحن)
+            await page.wait_for_selector('input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]', timeout=15000)
+            send_log(f"✅ Shipping form appeared after email: {email}")
+            return email
+        except:
+            # لو مفيش فورم شحن، يمكن ظهرت رسالة خطأ
+            error_popup = page.locator('text="Please check the email address"')
+            if await error_popup.count() > 0 and await error_popup.first.is_visible():
+                send_log(f"⚠️ Email rejected: {email}")
+                ok_btn = page.locator('button:has-text("OK"), .modal button, .popup button').first
+                if await ok_btn.count() > 0:
+                    await ok_btn.click(force=True)
+                    await page.wait_for_timeout(1000)
+                # نجيب حقل الإيميل تاني
+                email_locator = await wait_for_any(
+                    page,
+                    ['input[name="email"]', 'input[type="email"]', 'input[name="billing_email"]'],
+                    timeout=5000,
+                )
+                if not email_locator:
+                    raise Exception("Email field disappeared after popup")
+                continue
+            else:
+                # مفيش فورم ومفيش خطأ -> ناخد اسكرين شوت
+                await safe_screenshot(page, "guest_error.png", "🚨 فورم الشحن مش ظهر بعد Guest")
+                raise Exception("Shipping form did not appear")
 
     raise Exception("All email attempts failed")
-
-# ═══════════════════════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════════════════════
 
 async def main():
     async with async_playwright() as p:
@@ -170,13 +162,11 @@ async def main():
         page = await context.new_page()
 
         try:
-            # 1. فتح المنتج
             send_log("🔗 Opening product page...")
             await page.goto(PRODUCT_URL, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(3000)
             await accept_cookies(page)
 
-            # 2. إضافة للسلة
             send_log("➕ Adding product to basket...")
             add_to_cart_btn = page.locator(
                 'button:has-text("Add to Bag"), button:has-text("Add to Basket"), '
@@ -189,14 +179,12 @@ async def main():
             await add_to_cart_btn.click()
             await page.wait_for_timeout(3000)
 
-            # 3. السلة
             send_log("🛒 Going to basket...")
             await page.goto("https://www.stickandcaneshop.co.uk/basket",
                             wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(3000)
             await accept_cookies(page)
 
-            # 4. Checkout
             send_log("👉 Clicking Checkout...")
             checkout_btn = page.locator(
                 'a:has-text("Checkout"), button:has-text("Checkout"), '
@@ -214,7 +202,6 @@ async def main():
 
             await accept_cookies(page)
 
-            # 5. اختيار "New Customer"
             send_log("👤 Selecting 'New Customer'...")
             try:
                 await page.locator('label:has-text("I am a new customer")').first.click(force=True)
@@ -222,7 +209,6 @@ async def main():
             except Exception as e:
                 send_log(f"⚠️ radio click issue: {e}")
 
-            # 6. انتظار حقل الإيميل
             send_log("📧 Waiting for email input...")
             email_locator = await wait_for_any(
                 page,
@@ -232,7 +218,6 @@ async def main():
             if not email_locator:
                 raise Exception("Email input not found")
 
-            # 7. Checkout as Guest
             send_log("🚶 Choosing 'Checkout as a Guest'...")
             guest_btn = await wait_for_any(
                 page,
@@ -248,19 +233,18 @@ async def main():
             successful_email = await try_guest_checkout(page, email_locator, guest_btn)
             send_log(f"✅ Guest checkout successful with: {successful_email}")
 
-            # 8. انتظار فورم الشحن (بوقت أطول)
-            send_log("📝 Waiting for shipping form...")
-            await page.wait_for_timeout(6000)  # 6 ثواني
+            send_log("📝 Filling customer info...")
+            
+            # استنى شوية إضافية عشان الفورم يظهر
+            await page.wait_for_timeout(2000)
 
             first_name_loc = page.locator(
                 'input[name="first_name"], input[name="billing_first_name"], input[name="firstName"]'
             ).first
             if not await first_name_loc.count() > 0:
-                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر")
-                raise Exception("Shipping form not found")
+                await safe_screenshot(page, "no_form.png", "🚨 فورم الشحن مش ظهر بعد الانتظار")
+                raise Exception("Shipping form not found after wait")
 
-            # 9. ملء الفورم
-            send_log("📝 Filling customer info...")
             await first_name_loc.fill(CUSTOMER["first_name"], force=True)
             await page.locator('input[name="last_name"], input[name="billing_last_name"], input[name="lastName"]').first.fill(CUSTOMER["last_name"], force=True)
             await page.locator('input[name="address1"], input[name="billing_address1"], input[name="address"], input[name="addressLine1"]').first.fill(CUSTOMER["address"], force=True)
@@ -277,7 +261,6 @@ async def main():
 
             send_log("✅ Customer form filled.")
 
-            # 10. Submit
             send_log("➡️ Submitting form...")
             submit_btn = page.locator(
                 'button:has-text("Submit & Continue"), button:has-text("Continue"), '
@@ -288,7 +271,6 @@ async def main():
                 await page.wait_for_load_state("domcontentloaded")
                 await page.wait_for_timeout(5000)
 
-            # 11. Card
             send_log("💳 Selecting Credit/Debit Card...")
             card_label = await wait_for_any(
                 page,
@@ -305,7 +287,6 @@ async def main():
             await card_label.click(force=True)
             await page.wait_for_timeout(2000)
 
-            # 12. Fill Card
             send_log("🔢 Filling card...")
             await page.frame_locator(
                 'iframe[name="braintree-hosted-field-number"]'
@@ -321,12 +302,10 @@ async def main():
             if await accept_checkbox.count() > 0:
                 await accept_checkbox.check(force=True)
 
-            # 13. Complete Purchase
             send_log("🚀 Clicking 'Complete Purchase'...")
             await page.locator('#input_submit').click(force=True)
             await page.wait_for_timeout(10000)
 
-            # 14. النتيجة
             page_text = await page.inner_text("body")
             if "Transaction Not Allowed" in page_text:
                 result = "❌ Transaction Not Allowed"
@@ -350,10 +329,6 @@ async def main():
             await safe_screenshot(page, "error_screenshot.png", "🚨 Error Screenshot")
         finally:
             await browser.close()
-
-# ═══════════════════════════════════════════════════════════════════
-# RUNNER
-# ═══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     send_telegram("🚀 Bot started. Running process...")
