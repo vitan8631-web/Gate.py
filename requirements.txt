@@ -1,5 +1,5 @@
-playwright
-pyTelegramBotAPI
-fake-useragent
-requests
+python-telegram-bot
 httpx
+requests
+fake-useragent
+playwright
