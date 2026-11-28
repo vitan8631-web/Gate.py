@@ -134,7 +134,7 @@ def banned_guard(message):
         return True
     return False
 
-# ==================== Square Config (Requests instead of curl) ====================
+# ==================== Square Config (Requests) ====================
 SQUARE_SITE = "https://cosmos-industrial.com"
 SQUARE_PRODUCT_ID = 110
 SQUARE_PRICE = "5.00"
@@ -340,7 +340,29 @@ def check_square_sync(card_str):
                     'time': 0, 'bin': '', 'bin_info': '', 'approved': False}
         cc, mm, yy, cvv = parts[0], parts[1], parts[2], parts[3]
         started = time.time()
-        raw = run_async(square_run_check_async(cc, mm, yy, cvv, "78701"))
+        
+        # تشغيل Playwright في thread منفصل مع event loop خاص بيه
+        result_container = []
+        error_container = []
+        def run_square():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                raw = loop.run_until_complete(square_run_check_async(cc, mm, yy, cvv, "78701"))
+                result_container.append(raw)
+            except Exception as e:
+                error_container.append(e)
+            finally:
+                loop.close()
+        
+        t = threading.Thread(target=run_square)
+        t.start()
+        t.join()
+        
+        if error_container:
+            raise error_container[0]
+        
+        raw = result_container[0]
         elapsed = round(time.time() - started, 2)
         approved, message, status = square_classify(raw)
         return {
@@ -1452,7 +1474,7 @@ def check_commands_info(call):
 def vip_cmds(call):
     if banned_guard(call.message): return
     bot.answer_callback_query(call.id)
-    text = premium_emoji("💎 VIP COMMANDS:\n• Upload combo file - Mass checking (Max 2000)\n• /st [card] - Stripe single\n• /pp [card] - PayPal single\n• /sq [card] - Square 5$ single")
+    text = premium_emoji("💎 PLANS & COMMANDS:\n\n🤖 FREE:\n• /start\n• /cmds\n• /pp [card]\n• /sq [card]\n• /stop\n• /code [key]\n\n💎 VIP:\n• Upload combo file (Max 2000)\n• /st [card]\n• /pp [card]\n• /sq [card]\n\n👑 ADMIN:\n• /add [url]\n• /rmadd [num]\n• /show_gateways\n• /ban_user [id]\n• /unban_user [id]\n• /banned_list\n• /prm [id] [days]\n• /rmprm [id]\n• /addkey [pk] [sk]\n• /rmkey [id]\n• /wafa [days] [max]\n• /SENT [msg]")
     keyboard = {"inline_keyboard": [[{"text": "Back", "callback_data": "back_start", "style": "danger"}]]}
     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=json.dumps(keyboard))
 
