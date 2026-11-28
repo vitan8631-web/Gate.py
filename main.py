@@ -41,6 +41,30 @@ VIP_FILE_LIMIT = 2000
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
+def run_async(coro):
+    """يشغل كوروتين في thread منفصل مع event loop جديد"""
+    result_container = []
+    error_container = []
+    
+    def target():
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(coro)
+            result_container.append(result)
+        except Exception as e:
+            error_container.append(e)
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join()
+    
+    if error_container:
+        raise error_container[0]
+    return result_container[0] if result_container else None
+
 # ==================== Premium Emoji ====================
 PREMIUM_EMOJI_IDS = {
     "⚡": "6037229996622225123", "📌": "6037597564218384009", "🤖": "6039619012051082706",
@@ -316,7 +340,7 @@ def check_square_sync(card_str):
                     'time': 0, 'bin': '', 'bin_info': '', 'approved': False}
         cc, mm, yy, cvv = parts[0], parts[1], parts[2], parts[3]
         started = time.time()
-        raw = asyncio.run(square_run_check_async(cc, mm, yy, cvv, "78701"))
+        raw = run_async(square_run_check_async(cc, mm, yy, cvv, "78701"))
         elapsed = round(time.time() - started, 2)
         approved, message, status = square_classify(raw)
         return {
@@ -357,7 +381,7 @@ async def get_bin_info(bin_number):
         await asyncio.sleep(0.5)
     return "Unknown", "Unknown", "Unknown"
 
-# ==================== PayPal (with token decryption & required fields) ====================
+# ==================== PayPal ====================
 UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36'
 api_semaphore = asyncio.Semaphore(6)
 
@@ -1466,9 +1490,9 @@ def pp(message):
         gateway_index += 1
     msg = bot.reply_to(message, premium_emoji("💳 Checking..."))
     start_time = time.time()
-    status, response = asyncio.run(check_card_api(card_full, gateway_url))
+    status, response = run_async(check_card_api(card_full, gateway_url))
     taken = round(time.time() - start_time, 2)
-    text = asyncio.run(format_response(card_full, status, response, taken, gateway_url, gateway_num, user_id, "Single"))
+    text = run_async(format_response(card_full, status, response, taken, gateway_url, gateway_num, user_id, "Single"))
     bot.edit_message_text(text, message.chat.id, msg.message_id)
     if status == "approved" or status == "live":
         hit_counter += 1
@@ -1477,7 +1501,7 @@ def pp(message):
             status_text = "🔥 Charge" if "CHARGE" in str(response).upper() else "🔥 Approved"
         else:
             status_text = "💵 Insufficient Funds"
-        asyncio.run(send_hit(message.chat.id, hit_counter, username, status_text, response, gateway_name))
+        run_async(send_hit(message.chat.id, hit_counter, username, status_text, response, gateway_name))
 
 @bot.message_handler(commands=['st'])
 def st_check(message):
@@ -1503,17 +1527,17 @@ def st_check(message):
     start_time = time.time()
     result = check_stripe_sync(card)
     taken = round(time.time() - start_time, 2)
-    text = asyncio.run(format_stripe_response(card, result, taken, user_id, "Single"))
+    text = run_async(format_stripe_response(card, result, taken, user_id, "Single"))
     bot.edit_message_text(text, message.chat.id, msg.message_id)
     result_upper = str(result).upper()
     if "CHARGE" in result_upper or "SUCCEEDED" in result_upper:
         hit_counter += 1
         username = message.from_user.username or message.from_user.first_name or "Unknown"
-        asyncio.run(send_hit(message.chat.id, hit_counter, username, "🔥 Charge", result, "Stripe"))
+        run_async(send_hit(message.chat.id, hit_counter, username, "🔥 Charge", result, "Stripe"))
     elif "INSUFFICIENT" in result_upper or "LIVE" in result_upper:
         hit_counter += 1
         username = message.from_user.username or message.from_user.first_name or "Unknown"
-        asyncio.run(send_hit(message.chat.id, hit_counter, username, "💵 Insufficient Funds", result, "Stripe"))
+        run_async(send_hit(message.chat.id, hit_counter, username, "💵 Insufficient Funds", result, "Stripe"))
 
 @bot.message_handler(commands=['sq'])
 def sq_check(message):
@@ -1539,17 +1563,17 @@ def sq_check(message):
     start_time = time.time()
     result_dict = check_square_sync(card)
     taken = round(time.time() - start_time, 2)
-    text = asyncio.run(format_square_response(card, result_dict, taken, user_id, "Single"))
+    text = run_async(format_square_response(card, result_dict, taken, user_id, "Single"))
     bot.edit_message_text(text, message.chat.id, msg.message_id)
     status = result_dict.get('status', 'ERROR')
     message_text = result_dict.get('message', '')
     username = message.from_user.username or message.from_user.first_name or "Unknown"
     if status == "CHARGE":
         hit_counter += 1
-        asyncio.run(send_hit(message.chat.id, hit_counter, username, "🔥 Charge 5$", message_text, "Square 5$"))
+        run_async(send_hit(message.chat.id, hit_counter, username, "🔥 Charge 5$", message_text, "Square 5$"))
     elif status == "APPROVED":
         hit_counter += 1
-        asyncio.run(send_hit(message.chat.id, hit_counter, username, "💵 " + (message_text or "Approved"), message_text, "Square 5$"))
+        run_async(send_hit(message.chat.id, hit_counter, username, "💵 " + (message_text or "Approved"), message_text, "Square 5$"))
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
@@ -1627,11 +1651,11 @@ def gateway_callback(call):
     gateway_name = gateway_name_map.get(gateway_type, "Unknown")
     
     if gateway_type == "paypal":
-        asyncio.run(process_paypal_file(file_path, chat_id, gateway_name, username))
+        run_async(process_paypal_file(file_path, chat_id, gateway_name, username))
     elif gateway_type == "stripe":
-        asyncio.run(process_stripe_file(file_path, chat_id, gateway_name, username))
+        run_async(process_stripe_file(file_path, chat_id, gateway_name, username))
     elif gateway_type == "square":
-        asyncio.run(process_square_file(file_path, chat_id, gateway_name, username))
+        run_async(process_square_file(file_path, chat_id, gateway_name, username))
     del pending_files[user_id]
 
 @bot.message_handler(commands=['clean'])
